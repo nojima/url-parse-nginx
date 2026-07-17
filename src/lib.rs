@@ -638,16 +638,16 @@ fn ngx_http_parse_complex_uri(
 /// `merge_slashes` corresponds to nginx's [`merge_slashes`](https://nginx.org/en/docs/http/ngx_http_core_module.html#merge_slashes)
 /// directive: `true` is `on` (the nginx default), and `false` is `off`.
 pub fn parse_path_and_query(input: &[u8], merge_slashes: bool) -> Result<Parsed<'_>, ParseError> {
-    let uri_start = 0;
-    let uri_end = input.len();
     let mut r = Request::default();
 
-    // stage 1: never reads past the input (the loop stops at `uri_end` and does
-    // not touch `buf[uri_end]`), so it runs directly on `input` — no copy, no
-    // sentinel, no allocation.
+    // Stage 1 scans the request target and records whether normalization is
+    // needed. Unlike stage 2, it does not read nginx's trailing LF sentinel.
     ngx_http_parse_uri(&mut r, input)?;
 
     let path = if r.complex_uri || r.quoted_uri || r.empty_path_in_uri {
+        // Stage 2 normalizes the request target into a separate output buffer.
+        // `read_with_lf_sentinel` supplies nginx's trailing LF sentinel.
+        //
         // Output never exceeds input length; +1 covers the
         // (origin-form-unreachable) empty-path leading slash.
         let mut out = vec![0u8; input.len() + 1];
@@ -658,10 +658,10 @@ pub fn parse_path_and_query(input: &[u8], merge_slashes: bool) -> Result<Parsed<
         // "simple" path: returned unchanged, query string excluded — borrow the
         // input directly, no allocation.
         let len = match r.args_start {
-            Some(a) => a - 1 - uri_start,
-            None => uri_end - uri_start,
+            Some(a) => a - 1,
+            None => input.len(),
         };
-        Cow::Borrowed(&input[uri_start..uri_start + len])
+        Cow::Borrowed(&input[..len])
     };
 
     Ok(Parsed {
