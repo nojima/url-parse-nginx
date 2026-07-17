@@ -3,7 +3,7 @@
 A faithful, 1-to-1 Rust port of nginx's URL **path normalization**.
 
 `url-parse-nginx` reproduces exactly what nginx does when it turns a raw
-request path into the normalized `r->uri`: percent-decoding (`%XX`), resolution
+request path into the normalized `$uri`: percent-decoding (`%XX`), resolution
 of `.` and `..` segments, and `//` collapsing. It is a close port of two
 functions from nginx's `src/http/ngx_http_parse.c`:
 
@@ -29,7 +29,7 @@ fuzzer that runs the real nginx C code against this port (see below).
 use std::borrow::Cow;
 use url_parse_nginx::parse_path_and_query;
 
-// merge_slashes = true matches nginx's default (cscf->merge_slashes).
+// merge_slashes = true matches nginx's default `merge_slashes on`.
 // The result is a `Parsed { path: Cow<[u8]>, args: Option<&[u8]> }`.
 // Deref the path (&*) to compare against a byte slice.
 assert_eq!(&*parse_path_and_query(b"/a/./b/../c", true).unwrap().path, b"/c");
@@ -37,8 +37,8 @@ assert_eq!(&*parse_path_and_query(b"/%66oo", true).unwrap().path, b"/foo");
 assert_eq!(&*parse_path_and_query(b"/a//b", true).unwrap().path, b"/a/b");
 assert_eq!(&*parse_path_and_query(b"/a//b", false).unwrap().path, b"/a//b");
 
-// The path excludes the query string (exactly like nginx's r->uri); the query
-// is returned separately in `args` (like r->args), and is never normalized.
+// The path corresponds to nginx's initial $uri; the query is returned
+// separately in `args`, corresponding to the initial $args.
 let n = parse_path_and_query(b"/foo/../bar?x=1", true).unwrap();
 assert_eq!(&*n.path, b"/bar");
 assert_eq!(n.args, Some(&b"x=1"[..]));
@@ -56,14 +56,15 @@ assert!(parse_path_and_query(b"/../", true).is_err());
 `parse_path_and_query` returns:
 
 - `Ok(Parsed { path, args })`:
-  - `path: Cow<[u8]>` — the normalized path (nginx's `r->uri`, query string
-    excluded). A path that needs no normalization borrows the input unchanged
-    (`Cow::Borrowed`) with no allocation, exactly as nginx returns the original
-    bytes; a normalized path returns an owned buffer (`Cow::Owned`).
-  - `args: Option<&[u8]>` — the query string (nginx's `r->args`): the bytes
-    after the first `?`, up to a `#` fragment or the end of the target. It
-    always borrows the input (the query is never normalized). `None` when there
-    is no query component; `Some(b"")` marks a present-but-empty query (`/a?#f`).
+  - `path: Cow<[u8]>` — the normalized path corresponding to nginx's initial
+    `$uri`, with the query string excluded. A path that needs no normalization
+    borrows the input unchanged (`Cow::Borrowed`) with no allocation; a
+    normalized path returns an owned buffer (`Cow::Owned`).
+  - `args: Option<&[u8]>` — the query string corresponding to nginx's initial
+    `$args`: the bytes after the first `?`, up to a `#` fragment or the end of
+    the target. It always borrows the input and is never normalized. `None`
+    means nginx found no query arguments; `Some(b"")` marks the empty query
+    before a fragment in a target such as `/a?#f`.
 - `Err(ParseError)` — nginx rejected the target (invalid request).
 
 ## How the equivalence is verified

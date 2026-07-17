@@ -14,10 +14,10 @@
 //!
 //! This crate ports two functions from `src/http/ngx_http_parse.c`:
 //!
-//! * [`ngx_http_parse_uri`] — stage 1. Walks an origin-form path and sets the
+//! * `ngx_http_parse_uri()` — stage 1. Walks an origin-form path and sets the
 //!   `complex_uri` / `quoted_uri` / `plus_in_uri` flags and the `args_start` /
 //!   `uri_ext` boundaries. It does not modify the path.
-//! * [`ngx_http_parse_complex_uri`] — stage 2. Decodes `%XX`, resolves `.` /
+//! * `ngx_http_parse_complex_uri()` — stage 2. Decodes `%XX`, resolves `.` /
 //!   `..` and collapses `//` (when `merge_slashes` is set), producing the
 //!   normalized path.
 //!
@@ -71,31 +71,32 @@ fn read_with_lf_sentinel(buf: &[u8], p: usize) -> u8 {
     buf.get(p).copied().unwrap_or(b'\n')
 }
 
-/// The path was rejected by nginx (maps to `NGX_HTTP_PARSE_INVALID_REQUEST`
-/// / `NGX_ERROR`, i.e. `rc == -1` in the C harness).
+/// The request target was rejected as invalid by nginx.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParseError;
 
-/// The result of parsing an origin-form request target — the normalized
-/// `r->uri` and the `r->args` that nginx derives in
-/// `ngx_http_process_request_uri`.
+/// The result of parsing an origin-form request target.
+///
+/// `path` and `args` correspond to the initial values nginx exposes through
+/// its `$uri` and `$args` variables.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Parsed<'a> {
-    /// The normalized path (nginx's `r->uri`), query string excluded.
+    /// The normalized path, corresponding to nginx's `$uri` variable before
+    /// any later rewrite processing. The query string is excluded.
     ///
     /// A path that needs no normalization borrows the input unchanged
     /// ([`Cow::Borrowed`], no allocation); a normalized path is owned
     /// ([`Cow::Owned`]).
     pub path: Cow<'a, [u8]>,
 
-    /// The query string (nginx's `r->args`): the bytes after the first `?`, up
-    /// to a `#` fragment or the end of the target. It always borrows the input
-    /// — nginx never rewrites the query string.
+    /// The query string, corresponding to nginx's initial `$args` variable:
+    /// the bytes after the first `?`, up to a `#` fragment or the end of the
+    /// target. It always borrows the input and is not normalized.
     ///
-    /// `None` when the target has no query component (nginx's `r->args.data` is
-    /// NULL), which includes a trailing `?` with nothing after it (`"/a?"`).
-    /// `Some(b"")` marks a present-but-empty query, e.g. the one in `"/a?#f"`.
+    /// `None` means nginx found no query arguments; this includes a trailing
+    /// `?` with nothing after it (`"/a?"`). `Some(b"")` marks the empty query
+    /// before a fragment in a target such as `"/a?#f"`.
     pub args: Option<&'a [u8]>,
 }
 
@@ -145,7 +146,7 @@ enum State {
 
 /// Port of `ngx_http_parse_uri()`.
 ///
-/// Scans `buf[uri_start .. uri_end]` (origin-form) and sets flags/offsets.
+/// Scans the entire origin-form request target in `buf` and sets flags/offsets.
 /// Returns `Err` where the C returns `NGX_ERROR`.
 #[inline(never)]
 fn ngx_http_parse_uri(r: &mut Request, buf: &[u8]) -> Result<(), ParseError> {
@@ -312,9 +313,8 @@ fn finish_args(r: &mut Request, buf: &[u8], u: usize, mut p: usize) -> Result<()
 
 /// Port of `ngx_http_parse_complex_uri()`.
 ///
-/// Reads `buf[uri_start .. uri_end]`, and writes the normalized path into `out`,
-/// setting `r.uri.len`. `out` must have capacity
-/// `>= (uri_end - uri_start) + 1`.
+/// Reads the entire request target in `buf` and writes the normalized path into
+/// `out`, setting `r.uri.len`. `out` must have capacity `>= buf.len() + 1`.
 #[inline(never)]
 fn ngx_http_parse_complex_uri(
     r: &mut Request,
@@ -617,16 +617,18 @@ fn ngx_http_parse_complex_uri(
 
 /// Parse a single origin-form request target exactly as nginx does.
 ///
-/// Mirrors the Linux path of `ngx_http_process_request_uri()`:
+/// The returned values correspond to the initial values nginx exposes through
+/// its `$uri` and `$args` variables. nginx may subsequently change these
+/// variables during request processing.
 ///
-/// * `Ok(`[`Parsed`]`)` — the normalized path (`r->uri`) and query string
-///   (`r->args`). For a "simple" path that needs no normalization the path
-///   borrows the input unchanged ([`Cow::Borrowed`]) — no allocation — just as
-///   nginx returns the original bytes; normalization returns an owned buffer
-///   ([`Cow::Owned`]). The query string always borrows the input.
+/// * `Ok(`[`Parsed`]`)` — the normalized path and query string. For a "simple"
+///   path that needs no normalization, the path borrows the input unchanged
+///   ([`Cow::Borrowed`]) with no allocation; normalization returns an owned
+///   buffer ([`Cow::Owned`]). The query string always borrows the input.
 /// * `Err(ParseError)` — nginx rejected the target.
 ///
-/// `merge_slashes` corresponds to `cscf->merge_slashes` (nginx default: `true`).
+/// `merge_slashes` corresponds to nginx's [`merge_slashes`](https://nginx.org/en/docs/http/ngx_http_core_module.html#merge_slashes)
+/// directive: `true` is `on` (the nginx default), and `false` is `off`.
 pub fn parse_path_and_query(input: &[u8], merge_slashes: bool) -> Result<Parsed<'_>, ParseError> {
     let uri_start = 0;
     let uri_end = input.len();
