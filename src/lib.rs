@@ -71,9 +71,17 @@ fn read_with_lf_sentinel(buf: &[u8], p: usize) -> u8 {
     buf.get(p).copied().unwrap_or(b'\n')
 }
 
-/// The request target was rejected as invalid by nginx.
+/// An error returned when a request target cannot be parsed.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParseError;
+
+impl std::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("failed to parse request target")
+    }
+}
+
+impl std::error::Error for ParseError {}
 
 /// The result of parsing an origin-form request target.
 ///
@@ -625,7 +633,7 @@ fn ngx_http_parse_complex_uri(
 ///   path that needs no normalization, the path borrows the input unchanged
 ///   ([`Cow::Borrowed`]) with no allocation; normalization returns an owned
 ///   buffer ([`Cow::Owned`]). The query string always borrows the input.
-/// * `Err(ParseError)` — nginx rejected the target.
+/// * `Err(ParseError)` — the request target could not be parsed.
 ///
 /// `merge_slashes` corresponds to nginx's [`merge_slashes`](https://nginx.org/en/docs/http/ngx_http_core_module.html#merge_slashes)
 /// directive: `true` is `on` (the nginx default), and `false` is `off`.
@@ -707,6 +715,14 @@ mod tests {
             .unwrap()
             .args
             .map(|a| String::from_utf8(a.to_vec()).unwrap())
+    }
+
+    #[test]
+    fn parse_error_implements_std_error() {
+        fn assert_error<T: std::error::Error>() {}
+
+        assert_error::<ParseError>();
+        assert_eq!(ParseError.to_string(), "failed to parse request target");
     }
 
     #[test]

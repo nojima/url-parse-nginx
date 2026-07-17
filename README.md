@@ -65,7 +65,7 @@ assert!(parse_path_and_query(b"/../", true).is_err());
     the target. It always borrows the input and is never normalized. `None`
     means nginx found no query arguments; `Some(b"")` marks the empty query
     before a fragment in a target such as `/a?#f`.
-- `Err(ParseError)` — nginx rejected the target (invalid request).
+- `Err(ParseError)` — the request target could not be parsed.
 
 ## How the equivalence is verified
 
