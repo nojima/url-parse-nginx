@@ -1,0 +1,30 @@
+name: Differential fuzzing
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  fuzz:
+    name: Compare Rust with nginx
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Run differential fuzzer
+        run: >-
+          cargo run
+          --release
+          --manifest-path fuzz/Cargo.toml
+          --
+          1000000
+          11400714819323198485
