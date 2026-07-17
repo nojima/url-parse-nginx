@@ -579,7 +579,7 @@ args:
 
 /* ==== BEGIN authored wrapper ======================================= */
 /*
- * nginx_parse_path_and_query: parse one origin-form target exactly as nginx
+ * nginx_parse_origin_form: parse one origin-form target exactly as nginx
  * does.
  *
  *   in, in_len     non-empty raw request-target bytes (need NOT be
@@ -612,7 +612,7 @@ args:
  *     offset and length requires no additional buffer or allocation.
  */
 int
-nginx_parse_path_and_query(const unsigned char *in, size_t in_len,
+nginx_parse_origin_form(const unsigned char *in, size_t in_len,
                            int merge_slashes,
                            unsigned char *out, size_t out_cap, size_t *out_len,
                            size_t *args_offset, size_t *args_len,

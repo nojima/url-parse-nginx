@@ -15,7 +15,7 @@ differentially check that a nginx-compatible normalization crate returns
 - `ngx_http_parse_complex_uri()` — stage 2: the **normalizer** itself
   (`%XX` decoding, `.` / `..` / `//` resolution).
 
-It also adds a thin wrapper `nginx_parse_path_and_query()` that reproduces the
+It also adds a thin wrapper `nginx_parse_origin_form()` that reproduces the
 Linux path of `ngx_http_process_request_uri()` (from `ngx_http_request.c`) and
 exposes the normalized path and query arguments as a C ABI.
 
@@ -31,7 +31,7 @@ definitions are replaced by a minimal `ngx_http_request_t` in `ngx_stub.h`.
 
 | File | Role |
 |---|---|
-| `nginx_url.c` | The 3 verbatim regions + the `nginx_parse_path_and_query()` wrapper (generated) |
+| `nginx_url.c` | The 3 verbatim regions + the `nginx_parse_origin_form()` wrapper (generated) |
 | `ngx_stub.h` | Minimal type/macro shim (a struct with only the fields the two functions touch) |
 | `tools/extract.sh` | Regenerates the extracted regions from nginx |
 | `Makefile` | Build / self-test / regenerate / verify |
@@ -53,7 +53,7 @@ disable debug logging). The default `CFLAGS` in the `Makefile` already do this.
 ## C ABI
 
 ```c
-int nginx_parse_path_and_query(const unsigned char *in, size_t in_len,
+int nginx_parse_origin_form(const unsigned char *in, size_t in_len,
                                int merge_slashes,
                                unsigned char *out, size_t out_cap,
                                size_t *out_len, size_t *args_offset,
@@ -90,7 +90,7 @@ no additional output buffer or allocation.
 use std::os::raw::{c_int, c_uchar};
 
 extern "C" {
-    fn nginx_parse_path_and_query(
+    fn nginx_parse_origin_form(
         input: *const c_uchar, in_len: usize,
         merge_slashes: c_int,
         out: *mut c_uchar, out_cap: usize, out_len: *mut usize,
@@ -115,7 +115,7 @@ pub fn nginx_parse(
     let mut args_len = 0usize;
     let mut args_present = 0;
     let rc = unsafe {
-        nginx_parse_path_and_query(
+        nginx_parse_origin_form(
             input.as_ptr(), input.len(),
             merge_slashes as c_int,
             out.as_mut_ptr(), out.len(), &mut out_len,

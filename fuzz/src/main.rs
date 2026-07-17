@@ -16,7 +16,7 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::process::ExitCode;
 
 extern "C" {
-    fn nginx_parse_path_and_query(
+    fn nginx_parse_origin_form(
         input: *const u8,
         in_len: usize,
         merge_slashes: i32,
@@ -46,7 +46,7 @@ fn c_parse(input: &[u8], merge: bool) -> Option<ParseResult<'_>> {
     let mut args_len = 0usize;
     let mut args_present = 0i32;
     let rc = unsafe {
-        nginx_parse_path_and_query(
+        nginx_parse_origin_form(
             input.as_ptr(),
             input.len(),
             merge as i32,
@@ -93,7 +93,7 @@ fn c_parse(input: &[u8], merge: bool) -> Option<ParseResult<'_>> {
 
 /// Call the Rust port. `None` == rejected.
 fn rust_parse(input: &[u8], merge: bool) -> Option<ParseResult<'_>> {
-    url_parse_nginx::parse_path_and_query(input, merge)
+    url_parse_nginx::parse_origin_form(input, merge)
         .ok()
         .map(|parsed| ParseResult {
             path: parsed.path,

@@ -27,33 +27,33 @@ fuzzer that runs the real nginx C code against this port (see below).
 
 ```rust
 use std::borrow::Cow;
-use url_parse_nginx::parse_path_and_query;
+use url_parse_nginx::parse_origin_form;
 
 // merge_slashes = true matches nginx's default `merge_slashes on`.
 // The result is a `Parsed { path: Cow<[u8]>, args: Option<&[u8]> }`.
 // Deref the path (&*) to compare against a byte slice.
-assert_eq!(&*parse_path_and_query(b"/a/./b/../c", true).unwrap().path, b"/c");
-assert_eq!(&*parse_path_and_query(b"/%66oo", true).unwrap().path, b"/foo");
-assert_eq!(&*parse_path_and_query(b"/a//b", true).unwrap().path, b"/a/b");
-assert_eq!(&*parse_path_and_query(b"/a//b", false).unwrap().path, b"/a//b");
+assert_eq!(&*parse_origin_form(b"/a/./b/../c", true).unwrap().path, b"/c");
+assert_eq!(&*parse_origin_form(b"/%66oo", true).unwrap().path, b"/foo");
+assert_eq!(&*parse_origin_form(b"/a//b", true).unwrap().path, b"/a/b");
+assert_eq!(&*parse_origin_form(b"/a//b", false).unwrap().path, b"/a//b");
 
 // The path corresponds to nginx's initial $uri; the query is returned
 // separately in `args`, corresponding to the initial $args.
-let n = parse_path_and_query(b"/foo/../bar?x=1", true).unwrap();
+let n = parse_origin_form(b"/foo/../bar?x=1", true).unwrap();
 assert_eq!(&*n.path, b"/bar");
 assert_eq!(n.args, Some(&b"x=1"[..]));
 
 // No query component -> args is None.
-assert_eq!(parse_path_and_query(b"/foo", true).unwrap().args, None);
+assert_eq!(parse_origin_form(b"/foo", true).unwrap().args, None);
 
 // A "simple" path that needs no normalization borrows the input — no allocation.
-assert!(matches!(parse_path_and_query(b"/foo/bar", true).unwrap().path, Cow::Borrowed(_)));
+assert!(matches!(parse_origin_form(b"/foo/bar", true).unwrap().path, Cow::Borrowed(_)));
 
 // Paths nginx rejects return Err (e.g. escaping above the root).
-assert!(parse_path_and_query(b"/../", true).is_err());
+assert!(parse_origin_form(b"/../", true).is_err());
 ```
 
-`parse_path_and_query` returns:
+`parse_origin_form` returns:
 
 - `Ok(Parsed { path, args })`:
   - `path: Cow<[u8]>` — the normalized path corresponding to nginx's initial

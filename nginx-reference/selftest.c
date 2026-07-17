@@ -1,8 +1,8 @@
-/* Quick sanity checks for nginx_parse_path_and_query(). Not the fuzzer. */
+/* Quick sanity checks for nginx_parse_origin_form(). Not the fuzzer. */
 #include <stdio.h>
 #include <string.h>
 
-int nginx_parse_path_and_query(const unsigned char *in, size_t in_len,
+int nginx_parse_origin_form(const unsigned char *in, size_t in_len,
                                int merge_slashes,
                                unsigned char *out, size_t out_cap,
                                size_t *out_len, size_t *args_offset,
@@ -21,7 +21,7 @@ check(const char *in, int merge, int want_rc, const char *want_path,
     size_t args_len = 0;
     int args_present = 0;
     int want_args_present = want_args != NULL;
-    int rc = nginx_parse_path_and_query(
+    int rc = nginx_parse_origin_form(
         (const unsigned char *) in, in_len, merge, out, sizeof(out), &out_len,
         &args_offset, &args_len, &args_present);
 

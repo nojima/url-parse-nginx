@@ -12,21 +12,29 @@
 
 //! Parse and normalize URL paths using nginx semantics.
 //!
-//! [`parse_path_and_query`] accepts an origin-form request target, normalizes
+//! [`parse_origin_form`] accepts an origin-form request target, normalizes
 //! its path, and returns the query string separately. Path normalization
 //! percent-decodes `%XX`, resolves `.` and `..` segments, and optionally merges
 //! adjacent slashes.
 //!
-//! Only origin-form request targets starting with `/` are supported.
+//! [Origin-form] is the usual HTTP request-target format: a path starting
+//! with `/`, optionally followed by `?` and a query string, such as
+//! `/search?q=rust`.
+//!
+//! Other request-target forms, such as absolute-form
+//! (`http://example.com/path`), authority-form (`example.com:443`), and
+//! asterisk-form (`*`), are not supported.
 //! The parsing behavior follows nginx on Linux; Windows-specific nginx
 //! behavior is not supported.
+//!
+//! [Origin-form]: https://www.rfc-editor.org/rfc/rfc9112.html#section-3.2.1
 //!
 //! # Example
 //!
 //! ```
-//! use url_parse_nginx::parse_path_and_query;
+//! use url_parse_nginx::parse_origin_form;
 //!
-//! let parsed = parse_path_and_query(b"/docs/../hello%20world?x=1", true)?;
+//! let parsed = parse_origin_form(b"/docs/../hello%20world?x=1", true)?;
 //! assert_eq!(&*parsed.path, b"/hello world"); // ".." resolved, "%20" decoded
 //! assert_eq!(parsed.args, Some(&b"x=1"[..]));
 //! # Ok::<(), url_parse_nginx::ParseError>(())
@@ -653,7 +661,7 @@ fn ngx_http_parse_complex_uri(
 ///
 /// `merge_slashes` corresponds to nginx's [`merge_slashes`](https://nginx.org/en/docs/http/ngx_http_core_module.html#merge_slashes)
 /// directive: `true` is `on` (the nginx default), and `false` is `off`.
-pub fn parse_path_and_query(input: &[u8], merge_slashes: bool) -> Result<Parsed<'_>, ParseError> {
+pub fn parse_origin_form(input: &[u8], merge_slashes: bool) -> Result<Parsed<'_>, ParseError> {
     // HTTP/2 and HTTP/3 reject an empty :path before parsing it.
     if input.is_empty() {
         return Err(ParseError);
@@ -726,13 +734,13 @@ mod tests {
     use super::*;
 
     fn norm(s: &str, merge: bool) -> Result<String, ParseError> {
-        parse_path_and_query(s.as_bytes(), merge)
+        parse_origin_form(s.as_bytes(), merge)
             .map(|n| String::from_utf8(n.path.into_owned()).unwrap())
     }
 
     /// The query string as an `Option<&str>` (`None` == no query component).
     fn args(s: &str, merge: bool) -> Option<String> {
-        parse_path_and_query(s.as_bytes(), merge)
+        parse_origin_form(s.as_bytes(), merge)
             .unwrap()
             .args
             .map(|a| String::from_utf8(a.to_vec()).unwrap())
@@ -804,12 +812,12 @@ mod tests {
     fn simple_path_borrows_input() {
         // A path needing no normalization must not allocate.
         assert!(matches!(
-            parse_path_and_query(b"/foo/bar", true).unwrap().path,
+            parse_origin_form(b"/foo/bar", true).unwrap().path,
             Cow::Borrowed(_)
         ));
         // The query string is excluded, still by borrowing.
         assert!(matches!(
-            parse_path_and_query(b"/foo?a=1", true).unwrap().path,
+            parse_origin_form(b"/foo?a=1", true).unwrap().path,
             Cow::Borrowed(_)
         ));
     }
@@ -817,11 +825,11 @@ mod tests {
     #[test]
     fn parsed_path_is_owned() {
         assert!(matches!(
-            parse_path_and_query(b"/foo/../bar", true).unwrap().path,
+            parse_origin_form(b"/foo/../bar", true).unwrap().path,
             Cow::Owned(_)
         ));
         assert!(matches!(
-            parse_path_and_query(b"/%66oo", true).unwrap().path,
+            parse_origin_form(b"/%66oo", true).unwrap().path,
             Cow::Owned(_)
         ));
     }
@@ -853,7 +861,7 @@ mod tests {
     fn args_borrow_input() {
         // args always borrows the input (Option<&[u8]>, no allocation).
         let input = b"/foo?a=1";
-        let n = parse_path_and_query(input, true).unwrap();
+        let n = parse_origin_form(input, true).unwrap();
         let a = n.args.unwrap();
         assert!(std::ptr::eq(a.as_ptr(), input[5..].as_ptr()));
     }
