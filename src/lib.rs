@@ -12,6 +12,12 @@
 
 //! Parse and normalize URL paths using nginx semantics.
 //!
+//! `url-parse-nginx` is a one-to-one Rust port of nginx's URI parser
+//! and normalizer. Within the supported scope described below, it matches
+//! nginx's accept/reject decisions and produces byte-for-byte identical
+//! normalized paths and query strings. This equivalence is continuously
+//! checked by differential fuzzing against nginx's C implementation.
+//!
 //! [`parse_origin_form`] accepts an origin-form request target, normalizes
 //! its path, and returns the query string separately. Path normalization
 //! percent-decodes `%XX`, resolves `.` and `..` segments, and optionally merges
