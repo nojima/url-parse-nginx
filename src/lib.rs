@@ -23,7 +23,7 @@
 //!
 //! Only **origin-form** paths (starting with `/`, i.e. the HTTP/2 & HTTP/3
 //! `:path` semantics) are handled — matching the fuzzing scope of
-//! `url-fuzz-harness`.
+//! `nginx-reference`.
 //!
 //! # Porting conventions
 //!
@@ -579,7 +579,7 @@ fn ngx_http_parse_complex_uri(
 
 /// Normalize a single origin-form path exactly as nginx does.
 ///
-/// Mirrors the `nginx_normalize_path` wrapper in `url-fuzz-harness`, which
+/// Mirrors the `nginx_normalize_path` wrapper in `nginx-reference`, which
 /// reproduces the Linux path of `ngx_http_process_request_uri()`:
 ///
 /// * `Ok(path)` — the normalized path bytes (query string excluded, matching

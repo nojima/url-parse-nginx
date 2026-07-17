@@ -2,9 +2,9 @@ use std::path::PathBuf;
 
 fn main() {
     let manifest = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
-    // difffuzz is at url-parse-nginx/difffuzz; the C harness at
-    // url-parse-nginx/url-fuzz-harness.
-    let harness = manifest.join("../url-fuzz-harness");
+    // fuzz is at url-parse-nginx/fuzz; the C reference at
+    // url-parse-nginx/nginx-reference.
+    let harness = manifest.join("../nginx-reference");
     let src = harness.join("nginx_url.c");
 
     println!("cargo:rerun-if-changed={}", src.display());

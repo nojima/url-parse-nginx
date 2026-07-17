@@ -1,14 +1,14 @@
 [package]
-name = "difffuzz"
+name = "fuzz"
 version = "0.1.0"
 edition = "2021"
 publish = false
 
 # Differential fuzzer: compares the Rust port against the real nginx code
-# (compiled from ../../url-fuzz-harness/nginx_url.c) on random inputs.
+# (compiled from ../nginx-reference/nginx_url.c) on random inputs.
 
 [[bin]]
-name = "difffuzz"
+name = "fuzz"
 path = "src/main.rs"
 
 [dependencies]

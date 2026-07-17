@@ -7,7 +7,7 @@
 //!   - both reject  -> ok
 //!   - disagreement -> print the failing input and exit non-zero
 //!
-//! Usage:  difffuzz [iterations] [seed]
+//! Usage:  fuzz [iterations] [seed]
 //!   iterations  number of random inputs (default 5_000_000)
 //!   seed        u64 PRNG seed (default 0x9E3779B97F4A7C15)
 

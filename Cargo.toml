@@ -10,7 +10,7 @@ keywords = ["nginx", "url", "uri", "path", "normalization"]
 categories = ["parser-implementations", "web-programming"]
 # Dev-only tooling (differential fuzzer and the C harness it builds) is not
 # part of the published library.
-exclude = ["difffuzz", "url-fuzz-harness"]
+exclude = ["fuzz", "nginx-reference"]
 
 [lib]
 name = "url_parse_nginx"

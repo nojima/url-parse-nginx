@@ -52,17 +52,17 @@ assert!(normalize_path(b"/../", true).is_err());
 
 The repository contains developer tooling (not shipped in the published crate):
 
-- `url-fuzz-harness/` — a tiny C shared object that calls the **real** nginx
+- `nginx-reference/` — a tiny C shared object that calls the **real** nginx
   `ngx_http_parse_uri` / `ngx_http_parse_complex_uri`. The C is generated
   verbatim from a pinned official nginx release fetched from nginx.org by
   `tools/extract.sh`.
-- `difffuzz/` — a differential fuzzer that feeds the same inputs to nginx (C)
+- `fuzz/` — a differential fuzzer that feeds the same inputs to nginx (C)
   and to this crate and asserts identical results (both the normalized bytes
   and accept/reject), across both `merge_slashes` values.
 
 ```sh
 # exhaustive corpus ("/", "/"+1..3 arbitrary bytes) + random inputs
-cd difffuzz
+cd fuzz
 cargo run --release -- <iterations> <seed>
 ```
 
@@ -77,4 +77,4 @@ the 2-clause BSD license, so this crate is distributed under the same license
 and retains the original nginx copyright notice.
 
 See [`LICENSE`](LICENSE) and [`NOTICE`](NOTICE) for details, and
-`url-fuzz-harness/tools/extract.sh` for the exact pinned nginx version.
+`nginx-reference/tools/extract.sh` for the exact pinned nginx version.

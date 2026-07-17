@@ -6,7 +6,7 @@
 # This crate is developed independently of the nginx tree: the reference nginx
 # source is downloaded on demand (pinned version + sha256), never assumed to
 # live in a parent directory. The generated nginx_url.c is committed (vendored)
-# so that difffuzz builds offline; CI re-runs this script and checks that the
+# so that the fuzzer builds offline; CI re-runs this script and checks that the
 # committed file is unchanged (see `make verify`).
 #
 # Usage:

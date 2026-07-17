@@ -1,4 +1,4 @@
-# url-fuzz-harness
+# nginx-reference
 
 A tiny shared object that exposes nginx's URL path normalization logic so it
 can be called from the outside (e.g. a Rust fuzzer). It is used to
@@ -41,7 +41,7 @@ definitions are replaced by a minimal `ngx_http_request_t` in `ngx_stub.h`.
 ## Build
 
 ```sh
-cd url-fuzz-harness
+cd nginx-reference
 make            # -> libnginx_url.so
 make check      # build and run the self-test
 make clean
@@ -114,14 +114,14 @@ pub fn nginx_normalize(input: &[u8], merge_slashes: bool) -> Result<Option<Vec<u
 
 - **Compile the C directly in `build.rs` (recommended)** — use the `cc` crate to
   build `nginx_url.c` and link it statically. No `.so` to distribute, and the
-  fastest path for a fuzzer. This is what `../difffuzz` does.
+  fastest path for a fuzzer. This is what `../fuzz` does.
 
   ```rust
   // build.rs
   fn main() {
       cc::Build::new()
-          .file("url-fuzz-harness/nginx_url.c")
-          .include("url-fuzz-harness")
+          .file("nginx-reference/nginx_url.c")
+          .include("nginx-reference")
           .opt_level(1)
           .compile("nginx_url");
   }
@@ -158,7 +158,7 @@ This directory is independent of the nginx tree. The reference nginx source is
 **fetched on demand from nginx.org** by `tools/extract.sh` (with the version and
 sha256 pinned). It does not depend on a parent directory such as `../../src`.
 
-The generated `nginx_url.c` is **committed (vendored)**, so difffuzz builds
+The generated `nginx_url.c` is **committed (vendored)**, so the fuzzer builds
 offline. CI uses `make verify` to check that fetching and regenerating produces
 the exact same file that is committed.
 
