@@ -8,9 +8,9 @@ readme = "README.md"
 # repository = "https://github.com/<owner>/url-parse-nginx"  # set once the repo exists
 keywords = ["nginx", "url", "uri", "path", "normalization"]
 categories = ["parser-implementations", "web-programming"]
-# Dev-only tooling (differential fuzzer and the C harness it builds) is not
-# part of the published library.
-exclude = ["fuzz", "nginx-reference"]
+# Dev-only tooling (differential fuzzer, benchmark, and the C harness they
+# build) is not part of the published library.
+exclude = ["fuzz", "nginx-reference", "bench"]
 
 [lib]
 name = "url_parse_nginx"

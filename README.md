@@ -77,12 +77,30 @@ The repository contains developer tooling (not shipped in the published crate):
 - `fuzz/` — a differential fuzzer that feeds the same inputs to nginx (C)
   and to this crate and asserts identical results (both the normalized bytes
   and accept/reject), across both `merge_slashes` values.
+- `bench/` — a micro-benchmark comparing this crate's parse speed against the
+  real nginx C code (see below).
 
 ```sh
 # exhaustive corpus ("/", "/"+1..3 arbitrary bytes) + random inputs
 cd fuzz
 cargo run --release -- <iterations> <seed>
 ```
+
+## Benchmark
+
+`bench/` times the Rust port against the real nginx C code on long (~1 KiB)
+URLs, chosen so that the fixed per-call allocation cost does not dominate the
+measured parse time. It cross-checks that C and Rust agree on each input before
+timing, then reports the best (minimum) average ns/op over several rounds.
+
+```sh
+cd bench
+cargo run --release
+```
+
+Both sides are compiled at `-O3` for a fair comparison. Four inputs exercise the
+fast path (no normalization → the Rust port borrows the input) and the three
+normalization paths (`%XX` decoding, `.`/`..` resolution, `//` merging).
 
 The fixed corpus alone exhaustively covers `/` followed by every 1-, 2-, and
 3-byte suffix (~16.7M cases); random fuzzing extends coverage to longer inputs.

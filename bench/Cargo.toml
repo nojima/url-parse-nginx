@@ -1,0 +1,25 @@
+[package]
+name = "bench"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Micro-benchmark: compares the Rust port against the real nginx code
+# (compiled from ../nginx-reference/nginx_url.c) on long URLs, so that per-call
+# memory allocation does not dominate the measured parse time.
+
+[[bin]]
+name = "bench"
+path = "src/main.rs"
+
+[dependencies]
+url-parse-nginx = { path = ".." }
+
+[build-dependencies]
+cc = "1"
+
+[profile.release]
+# Optimize like a real build so the comparison is fair to both sides.
+opt-level = 3
+lto = true
+codegen-units = 1
