@@ -10,38 +10,52 @@
 // src/http/ngx_http_parse.c. It is distributed under the same 2-clause BSD
 // license as nginx; see the LICENSE and NOTICE files at the crate root.
 
-//! A faithful, 1-to-1 Rust port of nginx's URL path parser.
+//! Parse and normalize URL paths using nginx semantics.
 //!
-//! This crate ports two functions from `src/http/ngx_http_parse.c`:
+//! [`parse_path_and_query`] accepts an origin-form request target, normalizes
+//! its path, and returns the query string separately. Path normalization
+//! percent-decodes `%XX`, resolves `.` and `..` segments, and optionally merges
+//! adjacent slashes.
 //!
-//! * `ngx_http_parse_uri()` — stage 1. Walks an origin-form path and sets the
-//!   `complex_uri` / `quoted_uri` / `plus_in_uri` flags and the `args_start` /
-//!   `uri_ext` boundaries. It does not modify the path.
-//! * `ngx_http_parse_complex_uri()` — stage 2. Decodes `%XX`, resolves `.` /
-//!   `..` and collapses `//` (when `merge_slashes` is set), producing the
-//!   normalized path.
+//! Only origin-form request targets starting with `/` are supported.
 //!
-//! Only **origin-form** paths (starting with `/`, i.e. the HTTP/2 & HTTP/3
-//! `:path` semantics) are handled — matching the fuzzing scope of
-//! `nginx-reference`.
+//! # Example
 //!
-//! # Porting conventions
+//! ```
+//! use url_parse_nginx::parse_path_and_query;
 //!
-//! The C code walks raw buffers with `u_char *` cursors. Here:
-//!
-//! * `p` (the input cursor) is a `usize` index into a `buf: &[u8]`.
-//! * `u` (the output cursor) is a `usize` index into `out: &mut [u8]`.
-//!   Where nginx lets its pointer walk backwards past the buffer start during
-//!   `..` handling, the Rust port uses `checked_sub` and returns the same error.
-//! * Pointer fields that C stores as `u_char *` become `usize` offsets. Their
-//!   base buffer follows the C code exactly: `args_start` is always an offset
-//!   into the input; `uri_ext` is an input offset in stage 1 and an output
-//!   offset in stage 2 (it is reset at the top of stage 2, so the two never
-//!   interact — same as C).
-//! * nginx relies on "there is always at least one readable byte (the LF)
-//!   after the URI": stage 2 reads one byte at `uri_end`. The Rust port uses a
-//!   checked read that yields `\n` at that position, avoiding an input copy
-//!   made solely to materialize the sentinel.
+//! let parsed = parse_path_and_query(b"/docs/../hello%20world?x=1", true)?;
+//! assert_eq!(&*parsed.path, b"/hello world"); // ".." resolved, "%20" decoded
+//! assert_eq!(parsed.args, Some(&b"x=1"[..]));
+//! # Ok::<(), url_parse_nginx::ParseError>(())
+//! ```
+
+// Implementation notes:
+//
+// The parser ports two functions from `src/http/ngx_http_parse.c`:
+//
+// * `ngx_http_parse_uri()` — stage 1. Walks an origin-form path and sets the
+//   `complex_uri` / `quoted_uri` / `plus_in_uri` flags and the `args_start` /
+//   `uri_ext` boundaries. It does not modify the path.
+// * `ngx_http_parse_complex_uri()` — stage 2. Decodes `%XX`, resolves `.` /
+//   `..` and collapses `//` (when `merge_slashes` is set), producing the
+//   normalized path.
+//
+// The C code walks raw buffers with `u_char *` cursors. Here:
+//
+// * `p` (the input cursor) is a `usize` index into a `buf: &[u8]`.
+// * `u` (the output cursor) is a `usize` index into `out: &mut [u8]`.
+//   Where nginx lets its pointer walk backwards past the buffer start during
+//   `..` handling, the Rust port uses `checked_sub` and returns the same error.
+// * Pointer fields that C stores as `u_char *` become `usize` offsets. Their
+//   base buffer follows the C code exactly: `args_start` is always an offset
+//   into the input; `uri_ext` is an input offset in stage 1 and an output
+//   offset in stage 2 (it is reset at the top of stage 2, so the two never
+//   interact — same as C).
+// * nginx relies on "there is always at least one readable byte (the LF)
+//   after the URI": stage 2 reads one byte at `uri_end`. The Rust port uses a
+//   checked read that yields `\n` at that position, avoiding an input copy
+//   made solely to materialize the sentinel.
 
 use std::borrow::Cow;
 
