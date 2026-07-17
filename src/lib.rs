@@ -763,7 +763,15 @@ mod tests {
     fn percent_decoding() {
         assert_eq!(norm("/%66oo", true).unwrap(), "/foo");
         assert_eq!(norm("/a%2fb", true).unwrap(), "/a/b"); // decoded '/', not merged
+        assert_eq!(norm("/%2f/x", true).unwrap(), "/x");
         assert_eq!(norm("/%2e%2e/x", true), Err(ParseError)); // decoded ".." escapes
+    }
+
+    #[test]
+    fn encoded_dots() {
+        assert_eq!(norm("/foo/%2e%2e/bar", true).unwrap(), "/bar");
+        assert_eq!(norm("/foo%2f..%2fbar", true).unwrap(), "/bar");
+        assert_eq!(norm("/foo%2f%2e%2e%2fbar", true).unwrap(), "/bar");
     }
 
     #[test]
@@ -775,7 +783,9 @@ mod tests {
     #[test]
     fn invalid() {
         assert_eq!(norm("relative", true), Err(ParseError)); // must start with '/'
+        assert_eq!(norm("*", true), Err(ParseError)); // must start with '/'
         assert_eq!(norm("/%zz", true), Err(ParseError)); // bad %XX
+        assert_eq!(norm("/%00", true), Err(ParseError)); // null byte
     }
 
     #[test]
