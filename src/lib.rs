@@ -30,17 +30,18 @@
 //! The C code walks raw buffers with `u_char *` cursors. Here:
 //!
 //! * `p` (the input cursor) is a `usize` index into a `buf: &[u8]`.
-//! * `u` (the output cursor) is an `isize` index into `out: &mut [u8]`. It is
-//!   signed because nginx lets it walk *backwards* past the buffer start
-//!   during `..` handling and then checks `u < r->uri.data`.
+//! * `u` (the output cursor) is a `usize` index into `out: &mut [u8]`.
+//!   Where nginx lets its pointer walk backwards past the buffer start during
+//!   `..` handling, the Rust port uses `checked_sub` and returns the same error.
 //! * Pointer fields that C stores as `u_char *` become `usize` offsets. Their
 //!   base buffer follows the C code exactly: `args_start` is always an offset
 //!   into the input; `uri_ext` is an input offset in stage 1 and an output
 //!   offset in stage 2 (it is reset at the top of stage 2, so the two never
 //!   interact — same as C).
 //! * nginx relies on "there is always at least one readable byte (the LF)
-//!   after the URI": stage 2 reads one byte at `uri_end`. [`normalize_path`]
-//!   reproduces this by appending a trailing `\n` sentinel to the input copy.
+//!   after the URI": stage 2 reads one byte at `uri_end`. The Rust port uses a
+//!   checked read that yields `\n` at that position, avoiding an input copy
+//!   made solely to materialize the sentinel.
 
 use std::borrow::Cow;
 
@@ -62,6 +63,12 @@ const USUAL: [u32; 8] = [
 #[inline]
 fn usual(ch: u8) -> bool {
     USUAL[(ch >> 5) as usize] & (1u32 << (ch & 0x1f)) != 0
+}
+
+/// Read through stage 2's input cursor, including nginx's trailing LF.
+#[inline(always)]
+fn read_with_lf_sentinel(buf: &[u8], p: usize) -> u8 {
+    buf.get(p).copied().unwrap_or(b'\n')
 }
 
 /// The path was rejected by nginx (maps to `NGX_HTTP_PARSE_INVALID_REQUEST`
@@ -101,10 +108,6 @@ struct Str {
 /// The subset of `ngx_http_request_t` touched by the two ported functions.
 #[derive(Debug, Default)]
 struct Request {
-    // input range (indices into the working buffer)
-    uri_start: usize,
-    uri_end: usize,
-
     // outputs
     uri: Str,   // len = normalized path length; data = output-buffer offset
     args: Str,  // data = input offset (query string)
@@ -140,13 +143,17 @@ enum State {
 
 /// Port of `ngx_http_parse_uri()`.
 ///
-/// Scans `buf[r.uri_start .. r.uri_end]` (origin-form) and sets flags/offsets.
+/// Scans `buf[uri_start .. uri_end]` (origin-form) and sets flags/offsets.
 /// Returns `Err` where the C returns `NGX_ERROR`.
+#[inline(never)]
 fn ngx_http_parse_uri(r: &mut Request, buf: &[u8]) -> Result<(), ParseError> {
-    let mut state = UriState::Start;
-    let mut p = r.uri_start;
+    let uri_start = 0;
+    let uri_end = buf.len();
 
-    while p != r.uri_end {
+    let mut state = UriState::Start;
+    let mut p = uri_start;
+
+    while p != uri_end {
         let ch = buf[p];
 
         match state {
@@ -199,7 +206,14 @@ fn ngx_http_parse_uri(r: &mut Request, buf: &[u8]) -> Result<(), ParseError> {
             /* check "/", "%" and "\" (Win32) in URI */
             UriState::CheckUri => {
                 if usual(ch) {
-                    // stay in CheckUri
+                    // Stay in CheckUri. Ordinary bytes commonly occur in long
+                    // runs; consume the run here instead of redispatching the
+                    // same state for every byte.
+                    p += 1;
+                    while p != uri_end && usual(buf[p]) {
+                        p += 1;
+                    }
+                    continue;
                 } else {
                     match ch {
                         b'/' => {
@@ -259,13 +273,13 @@ fn ngx_http_parse_uri(r: &mut Request, buf: &[u8]) -> Result<(), ParseError> {
 }
 
 /// Shared tail of the `done:` label in `ngx_http_parse_complex_uri()`.
-fn finish_done(r: &mut Request, u: isize) -> Result<(), ParseError> {
-    r.uri.len = u as usize;
+fn finish_done(r: &mut Request, u: usize) -> Result<(), ParseError> {
+    r.uri.len = u;
 
     if let Some(ext) = r.uri_ext {
         // C computes a size_t difference that may wrap when u < uri_ext; match
         // that instead of panicking (exten is not part of the compared path).
-        r.exten.len = (u as usize).wrapping_sub(ext);
+        r.exten.len = u.wrapping_sub(ext);
         r.exten.data = ext;
     }
 
@@ -274,8 +288,10 @@ fn finish_done(r: &mut Request, u: isize) -> Result<(), ParseError> {
 }
 
 /// The `args:` label of `ngx_http_parse_complex_uri()`.
-fn finish_args(r: &mut Request, buf: &[u8], u: isize, mut p: usize) -> Result<(), ParseError> {
-    while p < r.uri_end {
+fn finish_args(r: &mut Request, buf: &[u8], u: usize, mut p: usize) -> Result<(), ParseError> {
+    let uri_end = buf.len();
+
+    while p < uri_end {
         let c = buf[p];
         p += 1;
         if c != b'#' {
@@ -294,46 +310,50 @@ fn finish_args(r: &mut Request, buf: &[u8], u: isize, mut p: usize) -> Result<()
 
 /// Port of `ngx_http_parse_complex_uri()`.
 ///
-/// Reads `buf[r.uri_start ..= r.uri_end]` (note: it reads the sentinel byte at
-/// `uri_end`) and writes the normalized path into `out`, setting `r.uri.len`.
-/// `out` must have capacity `>= (uri_end - uri_start) + 1`.
+/// Reads `buf[uri_start .. uri_end]`, and writes the normalized path into `out`,
+/// setting `r.uri.len`. `out` must have capacity
+/// `>= (uri_end - uri_start) + 1`.
+#[inline(never)]
 fn ngx_http_parse_complex_uri(
     r: &mut Request,
     buf: &[u8],
     out: &mut [u8],
     merge_slashes: bool,
 ) -> Result<(), ParseError> {
+    let uri_start = 0;
+    let uri_end = buf.len();
+
     let mut state = State::Usual;
     let mut quoted_state = State::Usual;
     let mut decoded: u8 = 0;
 
-    let mut p = r.uri_start;
-    let mut u: isize = 0;
+    let mut p = uri_start;
+    let mut u: usize = 0;
     r.uri_ext = None;
     r.args_start = None;
 
     if r.empty_path_in_uri {
-        out[u as usize] = b'/';
+        out[u] = b'/';
         u += 1;
     }
 
-    let mut ch = buf[p];
+    let mut ch = read_with_lf_sentinel(buf, p);
     p += 1;
 
-    while p <= r.uri_end {
+    while p <= uri_end {
         match state {
             State::Usual => {
                 if usual(ch) {
-                    out[u as usize] = ch;
+                    out[u] = ch;
                     u += 1;
-                    ch = buf[p];
+                    ch = read_with_lf_sentinel(buf, p);
                     p += 1;
                 } else {
                     match ch {
                         b'/' => {
                             r.uri_ext = None;
                             state = State::Slash;
-                            out[u as usize] = ch;
+                            out[u] = ch;
                             u += 1;
                         }
                         b'%' => {
@@ -348,21 +368,21 @@ fn ngx_http_parse_complex_uri(
                             return finish_done(r, u);
                         }
                         b'.' => {
-                            r.uri_ext = Some((u + 1) as usize);
-                            out[u as usize] = ch;
+                            r.uri_ext = Some(u + 1);
+                            out[u] = ch;
                             u += 1;
                         }
                         b'+' => {
                             r.plus_in_uri = true;
-                            out[u as usize] = ch;
+                            out[u] = ch;
                             u += 1;
                         }
                         _ => {
-                            out[u as usize] = ch;
+                            out[u] = ch;
                             u += 1;
                         }
                     }
-                    ch = buf[p];
+                    ch = read_with_lf_sentinel(buf, p);
                     p += 1;
                 }
             }
@@ -370,21 +390,21 @@ fn ngx_http_parse_complex_uri(
             State::Slash => {
                 if usual(ch) {
                     state = State::Usual;
-                    out[u as usize] = ch;
+                    out[u] = ch;
                     u += 1;
-                    ch = buf[p];
+                    ch = read_with_lf_sentinel(buf, p);
                     p += 1;
                 } else {
                     match ch {
                         b'/' => {
                             if !merge_slashes {
-                                out[u as usize] = ch;
+                                out[u] = ch;
                                 u += 1;
                             }
                         }
                         b'.' => {
                             state = State::Dot;
-                            out[u as usize] = ch;
+                            out[u] = ch;
                             u += 1;
                         }
                         b'%' => {
@@ -401,16 +421,16 @@ fn ngx_http_parse_complex_uri(
                         b'+' => {
                             r.plus_in_uri = true;
                             state = State::Usual;
-                            out[u as usize] = ch;
+                            out[u] = ch;
                             u += 1;
                         }
                         _ => {
                             state = State::Usual;
-                            out[u as usize] = ch;
+                            out[u] = ch;
                             u += 1;
                         }
                     }
-                    ch = buf[p];
+                    ch = read_with_lf_sentinel(buf, p);
                     p += 1;
                 }
             }
@@ -418,9 +438,9 @@ fn ngx_http_parse_complex_uri(
             State::Dot => {
                 if usual(ch) {
                     state = State::Usual;
-                    out[u as usize] = ch;
+                    out[u] = ch;
                     u += 1;
-                    ch = buf[p];
+                    ch = read_with_lf_sentinel(buf, p);
                     p += 1;
                 } else {
                     match ch {
@@ -430,7 +450,7 @@ fn ngx_http_parse_complex_uri(
                         }
                         b'.' => {
                             state = State::DotDot;
-                            out[u as usize] = ch;
+                            out[u] = ch;
                             u += 1;
                         }
                         b'%' => {
@@ -449,16 +469,16 @@ fn ngx_http_parse_complex_uri(
                         b'+' => {
                             r.plus_in_uri = true;
                             state = State::Usual;
-                            out[u as usize] = ch;
+                            out[u] = ch;
                             u += 1;
                         }
                         _ => {
                             state = State::Usual;
-                            out[u as usize] = ch;
+                            out[u] = ch;
                             u += 1;
                         }
                     }
-                    ch = buf[p];
+                    ch = read_with_lf_sentinel(buf, p);
                     p += 1;
                 }
             }
@@ -466,24 +486,21 @@ fn ngx_http_parse_complex_uri(
             State::DotDot => {
                 if usual(ch) {
                     state = State::Usual;
-                    out[u as usize] = ch;
+                    out[u] = ch;
                     u += 1;
-                    ch = buf[p];
+                    ch = read_with_lf_sentinel(buf, p);
                     p += 1;
                 } else {
                     match ch {
                         b'/' | b'?' | b'#' => {
-                            u -= 4;
-                            loop {
-                                if u < 0 {
-                                    return Err(ParseError);
-                                }
-                                if out[u as usize] == b'/' {
-                                    u += 1;
-                                    break;
-                                }
-                                u -= 1;
-                            }
+                            // Same backwards scan as nginx's loop, expressed
+                            // over a bounded slice so indexing stays checked.
+                            let start = u.checked_sub(4).ok_or(ParseError)?;
+                            u = out[..=start]
+                                .iter()
+                                .rposition(|&c| c == b'/')
+                                .map(|i| i + 1)
+                                .ok_or(ParseError)?;
                             if ch == b'?' {
                                 r.args_start = Some(p);
                                 return finish_args(r, buf, u, p);
@@ -500,16 +517,16 @@ fn ngx_http_parse_complex_uri(
                         b'+' => {
                             r.plus_in_uri = true;
                             state = State::Usual;
-                            out[u as usize] = ch;
+                            out[u] = ch;
                             u += 1;
                         }
                         _ => {
                             state = State::Usual;
-                            out[u as usize] = ch;
+                            out[u] = ch;
                             u += 1;
                         }
                     }
-                    ch = buf[p];
+                    ch = read_with_lf_sentinel(buf, p);
                     p += 1;
                 }
             }
@@ -520,14 +537,14 @@ fn ngx_http_parse_complex_uri(
                 if ch.is_ascii_digit() {
                     decoded = ch - b'0';
                     state = State::QuotedSecond;
-                    ch = buf[p];
+                    ch = read_with_lf_sentinel(buf, p);
                     p += 1;
                 } else {
                     let c = ch | 0x20;
                     if (b'a'..=b'f').contains(&c) {
                         decoded = c - b'a' + 10;
                         state = State::QuotedSecond;
-                        ch = buf[p];
+                        ch = read_with_lf_sentinel(buf, p);
                         p += 1;
                     } else {
                         return Err(ParseError);
@@ -541,9 +558,9 @@ fn ngx_http_parse_complex_uri(
 
                     if ch == b'%' || ch == b'#' {
                         state = State::Usual;
-                        out[u as usize] = ch;
+                        out[u] = ch;
                         u += 1;
-                        ch = buf[p];
+                        ch = read_with_lf_sentinel(buf, p);
                         p += 1;
                     } else if ch == b'\0' {
                         return Err(ParseError);
@@ -558,9 +575,9 @@ fn ngx_http_parse_complex_uri(
 
                         if ch == b'?' {
                             state = State::Usual;
-                            out[u as usize] = ch;
+                            out[u] = ch;
                             u += 1;
-                            ch = buf[p];
+                            ch = read_with_lf_sentinel(buf, p);
                             p += 1;
                         } else {
                             if ch == b'+' {
@@ -584,17 +601,13 @@ fn ngx_http_parse_complex_uri(
     if state == State::Dot {
         u -= 1;
     } else if state == State::DotDot {
-        u -= 4;
-        loop {
-            if u < 0 {
-                return Err(ParseError);
-            }
-            if out[u as usize] == b'/' {
-                u += 1;
-                break;
-            }
-            u -= 1;
-        }
+        // Same backwards scan as above for a trailing `..`.
+        let start = u.checked_sub(4).ok_or(ParseError)?;
+        u = out[..=start]
+            .iter()
+            .rposition(|&c| c == b'/')
+            .map(|i| i + 1)
+            .ok_or(ParseError)?;
     }
 
     finish_done(r, u)
@@ -613,11 +626,9 @@ fn ngx_http_parse_complex_uri(
 ///
 /// `merge_slashes` corresponds to `cscf->merge_slashes` (nginx default: `true`).
 pub fn normalize_path(input: &[u8], merge_slashes: bool) -> Result<Normalized<'_>, ParseError> {
-    let mut r = Request {
-        uri_start: 0,
-        uri_end: input.len(),
-        ..Request::default()
-    };
+    let uri_start = 0;
+    let uri_end = input.len();
+    let mut r = Request::default();
 
     // stage 1: never reads past the input (the loop stops at `uri_end` and does
     // not touch `buf[uri_end]`), so it runs directly on `input` — no copy, no
@@ -625,28 +636,20 @@ pub fn normalize_path(input: &[u8], merge_slashes: bool) -> Result<Normalized<'_
     ngx_http_parse_uri(&mut r, input)?;
 
     let path = if r.complex_uri || r.quoted_uri || r.empty_path_in_uri {
-        // stage 2 reads one byte past the URI (`buf[uri_end]`), relying on
-        // nginx's invariant that a readable byte (the LF) always follows.
-        // Materialize that only here, where normalization actually happens:
-        // copy the input and append the '\n' sentinel.
-        let mut buf = Vec::with_capacity(input.len() + 1);
-        buf.extend_from_slice(input);
-        buf.push(b'\n');
-
         // Output never exceeds input length; +1 covers the
         // (origin-form-unreachable) empty-path leading slash.
         let mut out = vec![0u8; input.len() + 1];
-        ngx_http_parse_complex_uri(&mut r, &buf, &mut out, merge_slashes)?;
+        ngx_http_parse_complex_uri(&mut r, input, &mut out, merge_slashes)?;
         out.truncate(r.uri.len);
         Cow::Owned(out)
     } else {
         // "simple" path: returned unchanged, query string excluded — borrow the
         // input directly, no allocation.
         let len = match r.args_start {
-            Some(a) => a - 1 - r.uri_start,
-            None => r.uri_end - r.uri_start,
+            Some(a) => a - 1 - uri_start,
+            None => uri_end - uri_start,
         };
-        Cow::Borrowed(&input[r.uri_start..r.uri_start + len])
+        Cow::Borrowed(&input[uri_start..uri_start + len])
     };
 
     Ok(Normalized {
@@ -669,6 +672,8 @@ pub fn normalize_path(input: &[u8], merge_slashes: bool) -> Result<Normalized<'_
 /// has already recorded `r.args` and cleared `args_start`; that case skips the
 /// block above, exactly as the NULL `args_start` does in nginx.
 fn normalized_args<'a>(r: &Request, input: &'a [u8]) -> Option<&'a [u8]> {
+    let uri_end = input.len();
+
     // `args.data` is an offset just after a '?', always >= 2 for origin-form
     // input (the path starts with '/'), so 0 is nginx's NULL sentinel. A
     // non-zero `data` means parse_complex_uri delimited the query at a '#'
@@ -678,7 +683,7 @@ fn normalized_args<'a>(r: &Request, input: &'a [u8]) -> Option<&'a [u8]> {
     }
     // Otherwise the query, if any, runs from `args_start` to the end of input.
     match r.args_start {
-        Some(a) if r.uri_end > a => Some(&input[a..r.uri_end]),
+        Some(a) if uri_end > a => Some(&input[a..uri_end]),
         _ => None,
     }
 }

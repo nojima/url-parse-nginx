@@ -86,6 +86,10 @@ cd fuzz
 cargo run --release -- <iterations> <seed>
 ```
 
+Before random generation, the fuzzer exhaustively checks `/` followed by every
+1-, 2-, and 3-byte suffix (~16.7M cases). Random fuzzing then extends coverage
+to longer inputs.
+
 ## Benchmark
 
 `bench/` times the Rust port against the real nginx C code on long (~1 KiB)
@@ -102,8 +106,20 @@ Both sides are compiled at `-O3` for a fair comparison. Four inputs exercise the
 fast path (no normalization → the Rust port borrows the input) and the three
 normalization paths (`%XX` decoding, `.`/`..` resolution, `//` merging).
 
-The fixed corpus alone exhaustively covers `/` followed by every 1-, 2-, and
-3-byte suffix (~16.7M cases); random fuzzing extends coverage to longer inputs.
+One representative run on an AMD Ryzen 9 5900X (x86-64) with rustc 1.97.1
+produced:
+
+| case | bytes | C ns/op | Rust ns/op | speedup |
+|---|---:|---:|---:|---:|
+| simple (no normalization) | 1001 | 561.9 | 517.3 | 1.09x |
+| percent-decode | 1001 | 1945.7 | 2242.5 | 0.87x |
+| dot-dot resolution | 1000 | 1928.2 | 2779.9 | 0.69x |
+| slash merge | 1000 | 1823.7 | 2264.6 | 0.81x |
+
+`speedup` is C ns/op divided by Rust ns/op, so values above `1.0x` mean the
+Rust port is faster. These figures are illustrative: absolute timings and
+ratios vary with the CPU, compiler version, system load, and code layout. Run
+the benchmark locally when comparing changes.
 
 ## Relationship to nginx and license
 
