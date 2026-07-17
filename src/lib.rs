@@ -23,6 +23,12 @@
 //! percent-decodes `%XX`, resolves `.` and `..` segments, and optionally merges
 //! adjacent slashes.
 //!
+//! Some nginx processing paths, including some `proxy_pass` cases, first
+//! normalize and percent-decode the request path, then percent-encode the
+//! normalized path again. To reproduce this decode-then-encode flow, pass
+//! [`Parsed::path`] to `percent_encoding::percent_encode` with
+//! [`PATH_ESCAPE_SET`].
+//!
 //! [Origin-form] is the usual HTTP request-target format: a path starting
 //! with `/`, optionally followed by `?` and a query string, such as
 //! `/search?q=rust`.
@@ -38,11 +44,15 @@
 //! # Example
 //!
 //! ```
-//! use url_parse_nginx::parse_origin_form;
+//! use percent_encoding::percent_encode;
+//! use url_parse_nginx::{parse_origin_form, PATH_ESCAPE_SET};
 //!
 //! let parsed = parse_origin_form(b"/docs/../hello%20world?x=1", true)?;
 //! assert_eq!(&*parsed.path, b"/hello world"); // ".." resolved, "%20" decoded
 //! assert_eq!(parsed.args, Some(&b"x=1"[..]));
+//!
+//! let encoded = percent_encode(parsed.path.as_ref(), PATH_ESCAPE_SET);
+//! assert_eq!(encoded.to_string(), "/hello%20world");
 //! # Ok::<(), url_parse_nginx::ParseError>(())
 //! ```
 
@@ -73,7 +83,34 @@
 //   checked read that yields `\n` at that position, avoiding an input copy
 //   made solely to materialize the sentinel.
 
+use percent_encoding::{AsciiSet, CONTROLS};
 use std::borrow::Cow;
+
+/// The percent-encode set nginx uses when escaping normalized paths.
+///
+/// # Example
+///
+/// ```
+/// use percent_encoding::percent_encode;
+/// use url_parse_nginx::PATH_ESCAPE_SET;
+///
+/// let encoded = percent_encode(b"/hello world", PATH_ESCAPE_SET);
+/// assert_eq!(encoded.to_string(), "/hello%20world");
+/// ```
+pub const PATH_ESCAPE_SET: &AsciiSet = &CONTROLS
+    .add(b' ')
+    .add(b'"')
+    .add(b'#')
+    .add(b'%')
+    .add(b'<')
+    .add(b'>')
+    .add(b'?')
+    .add(b'\\')
+    .add(b'^')
+    .add(b'`')
+    .add(b'{')
+    .add(b'|')
+    .add(b'}');
 
 /// nginx's `usual[]` bitmap (`ngx_http_parse.c`), non-`NGX_WIN32` variant.
 ///
