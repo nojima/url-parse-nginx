@@ -62,7 +62,7 @@ int nginx_parse_path_and_query(const unsigned char *in, size_t in_len,
 
 | Argument | Meaning |
 |---|---|
-| `in`, `in_len` | Raw origin-form request-target bytes. Need not be NUL-terminated; may be empty. |
+| `in`, `in_len` | Non-empty raw origin-form request-target bytes. Need not be NUL-terminated. |
 | `merge_slashes` | `1` collapses `//` (nginx default), `0` keeps it. **Use as a fuzzer input.** |
 | `out`, `out_cap` | Output buffer; capacity must be `>= in_len + 1`. |
 | `out_len` | Set to the normalized path length on success. |

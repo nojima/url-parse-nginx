@@ -74,6 +74,7 @@ main(void)
     check("/foo?#fragment",    1, 0, "/foo", "");
 
     /* invalid */
+    check("",                  1, -1, "", NULL);  /* empty :path */
     check("relative",          1, -1, "", NULL);  /* must start with '/' */
     check("/%zz",              1, -1, "", NULL);  /* bad %XX */
 

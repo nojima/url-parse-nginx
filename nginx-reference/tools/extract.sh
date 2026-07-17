@@ -130,7 +130,8 @@ cat >> "$OUT" <<'TAIL'
  * nginx_parse_path_and_query: parse one origin-form target exactly as nginx
  * does.
  *
- *   in, in_len     raw request-target bytes (need NOT be NUL-terminated)
+ *   in, in_len     non-empty raw request-target bytes (need NOT be
+ *                  NUL-terminated)
  *   merge_slashes  fuzzer input: 1 = collapse "//" (nginx default), 0 = keep
  *   out            caller buffer; must have capacity >= in_len + 1
  *   out_cap        capacity of out
@@ -170,6 +171,11 @@ nginx_parse_path_and_query(const unsigned char *in, size_t in_len,
     int                 rc = 0;
 
     memset(&r, 0, sizeof(r));
+
+    /* HTTP/2 and HTTP/3 reject an empty :path before parsing it. */
+    if (in_len == 0) {
+        return -1;
+    }
 
     inbuf = (u_char *) malloc(in_len + 1);
     nbuf  = (u_char *) malloc(in_len + 1);

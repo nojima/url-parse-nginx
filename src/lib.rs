@@ -652,6 +652,11 @@ fn ngx_http_parse_complex_uri(
 /// `merge_slashes` corresponds to nginx's [`merge_slashes`](https://nginx.org/en/docs/http/ngx_http_core_module.html#merge_slashes)
 /// directive: `true` is `on` (the nginx default), and `false` is `off`.
 pub fn parse_path_and_query(input: &[u8], merge_slashes: bool) -> Result<Parsed<'_>, ParseError> {
+    // HTTP/2 and HTTP/3 reject an empty :path before parsing it.
+    if input.is_empty() {
+        return Err(ParseError);
+    }
+
     let mut r = Request::default();
 
     // Stage 1 scans the request target and records whether normalization is
@@ -790,7 +795,7 @@ mod tests {
 
     #[test]
     fn empty() {
-        assert_eq!(norm("", true).unwrap(), "");
+        assert_eq!(norm("", true), Err(ParseError));
     }
 
     #[test]
