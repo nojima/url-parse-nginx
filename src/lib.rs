@@ -80,6 +80,7 @@ pub struct ParseError;
 /// `r->uri` and the `r->args` that nginx derives in
 /// `ngx_http_process_request_uri`.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Parsed<'a> {
     /// The normalized path (nginx's `r->uri`), query string excluded.
     ///
