@@ -18,6 +18,8 @@
 //! adjacent slashes.
 //!
 //! Only origin-form request targets starting with `/` are supported.
+//! The parsing behavior follows nginx on Linux; Windows-specific nginx
+//! behavior is not supported.
 //!
 //! # Example
 //!
