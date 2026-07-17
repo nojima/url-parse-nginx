@@ -41,8 +41,10 @@ echo "verifying sha256"
 echo "${NGINX_SHA256}  ${tarball}" | sha256sum -c -
 
 tar -xzf "$tarball" -C "$WORK"
-SRC="$WORK/nginx-${NGINX_VERSION}/src/http/ngx_http_parse.c"
-[[ -f "$SRC" ]] || { echo "error: $SRC not found in tarball" >&2; exit 1; }
+HTTP_SRC="$WORK/nginx-${NGINX_VERSION}/src/http/ngx_http_parse.c"
+CORE_SRC="$WORK/nginx-${NGINX_VERSION}/src/core/ngx_string.c"
+[[ -f "$HTTP_SRC" ]] || { echo "error: $HTTP_SRC not found in tarball" >&2; exit 1; }
+[[ -f "$CORE_SRC" ]] || { echo "error: $CORE_SRC not found in tarball" >&2; exit 1; }
 
 # --- pattern-based extraction (robust to line-number drift across versions) ---
 
@@ -52,7 +54,7 @@ extract_usual() {
         /^static uint32_t  usual\[\] = \{/ { c = 1 }
         c { print }
         c && /^};/ { exit }
-    ' "$SRC"
+    ' "$HTTP_SRC"
 }
 
 # A top-level function definition: the return-type line + signature line through
@@ -63,15 +65,16 @@ extract_fn() {
         c { print }
         c && /^}/ { exit }
         { prev = $0 }
-    ' "$SRC"
+    ' "$2"
 }
 
 # sanity: make sure each region was found and is non-trivial
 check_nonempty() { [[ "$(wc -l <<<"$1")" -ge 5 ]] || { echo "error: extraction of '$2' failed" >&2; exit 1; }; }
 
-USUAL="$(extract_usual)";                            check_nonempty "$USUAL" "usual[]"
-PARSE_URI="$(extract_fn ngx_http_parse_uri)";        check_nonempty "$PARSE_URI" "ngx_http_parse_uri"
-COMPLEX="$(extract_fn ngx_http_parse_complex_uri)";  check_nonempty "$COMPLEX" "ngx_http_parse_complex_uri"
+USUAL="$(extract_usual)";                                      check_nonempty "$USUAL" "usual[]"
+PARSE_URI="$(extract_fn ngx_http_parse_uri "$HTTP_SRC")";       check_nonempty "$PARSE_URI" "ngx_http_parse_uri"
+COMPLEX="$(extract_fn ngx_http_parse_complex_uri "$HTTP_SRC")"; check_nonempty "$COMPLEX" "ngx_http_parse_complex_uri"
+ESCAPE_URI="$(extract_fn ngx_escape_uri "$CORE_SRC")";          check_nonempty "$ESCAPE_URI" "ngx_escape_uri"
 
 # --- assemble nginx_url.c ---
 cat > "$OUT" <<HEAD
@@ -82,7 +85,7 @@ cat > "$OUT" <<HEAD
  * Do NOT edit the extracted regions by hand; re-run tools/extract.sh instead.
  *
  * The extracted regions below are VERBATIM from src/http/ngx_http_parse.c and
- * are covered by the nginx license:
+ * src/core/ngx_string.c, and are covered by the nginx license:
  *
  *   Copyright (C) Igor Sysoev
  *   Copyright (C) Nginx, Inc.
@@ -92,6 +95,7 @@ cat > "$OUT" <<HEAD
  *   - usual[]                     (the "ordinary character" bitmap)
  *   - ngx_http_parse_uri()        (stage 1: origin-form flag/boundary setter)
  *   - ngx_http_parse_complex_uri()(stage 2: the actual path normalizer)
+ *   - ngx_escape_uri()            (percent-encoder used for URI paths)
  * plus a small wrapper that reproduces the Linux path of
  * ngx_http_process_request_uri() and exposes a C ABI for Rust FFI.
  */
@@ -121,8 +125,17 @@ MID2
 
 printf '%s\n' "$COMPLEX" >> "$OUT"
 
-cat >> "$OUT" <<'TAIL'
+cat >> "$OUT" <<'MID3'
 /* ==== END verbatim: ngx_http_parse_complex_uri() =================== */
+
+
+/* ==== BEGIN verbatim: ngx_escape_uri() (ngx_string.c) ============== */
+MID3
+
+printf '%s\n' "$ESCAPE_URI" >> "$OUT"
+
+cat >> "$OUT" <<'TAIL'
+/* ==== END verbatim: ngx_escape_uri() =============================== */
 
 
 /* ==== BEGIN authored wrapper ======================================= */

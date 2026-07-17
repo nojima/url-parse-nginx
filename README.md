@@ -78,7 +78,8 @@ The repository contains developer tooling (not shipped in the published crate):
 - `fuzz/` — a differential fuzzer that feeds the same inputs to nginx (C)
   and to this crate and asserts identical results (normalized path, query
   string including absent versus present-but-empty, and accept/reject), across
-  both `merge_slashes` values.
+  both `merge_slashes` values. It also checks `PATH_ESCAPE_SET` against nginx's
+  percent-encoder for all 256 possible byte values.
 - `bench/` — a micro-benchmark comparing this crate's parse speed against the
   real nginx C code (see below).
 

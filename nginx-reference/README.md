@@ -7,13 +7,15 @@ differentially check that a nginx-compatible normalization crate returns
 
 ## What's inside
 
-`nginx_url.c` copies the following **verbatim** from `src/http/ngx_http_parse.c`:
+`nginx_url.c` copies the following **verbatim** from nginx:
 
-- `usual[]` — the "ordinary character" bitmap.
+- `usual[]` (`src/http/ngx_http_parse.c`) — the "ordinary character" bitmap.
 - `ngx_http_parse_uri()` — stage 1: walks an origin-form path and sets the
   `complex_uri` / `quoted_uri` / `args_start` flags and boundaries.
 - `ngx_http_parse_complex_uri()` — stage 2: the **normalizer** itself
   (`%XX` decoding, `.` / `..` / `//` resolution).
+- `ngx_escape_uri()` (`src/core/ngx_string.c`) — the percent-encoder used to
+  verify `PATH_ESCAPE_SET`.
 
 It also adds a thin wrapper `nginx_parse_origin_form()` that reproduces the
 Linux path of `ngx_http_process_request_uri()` (from `ngx_http_request.c`) and
@@ -23,7 +25,7 @@ exposes the normalized path and query arguments as a C ABI.
 > (`http://host/path`), authority-form (`CONNECT`), and `OPTIONS *` are out of
 > scope. This matches the semantics of the HTTP/2 and HTTP/3 `:path` header.
 
-The two extracted functions **call no other nginx function**, so there are no
+The extracted functions **call no other nginx function**, so there are no
 `.o` files to link and the only undefined symbols are libc. nginx's type
 definitions are replaced by a minimal `ngx_http_request_t` in `ngx_stub.h`.
 
@@ -31,8 +33,8 @@ definitions are replaced by a minimal `ngx_http_request_t` in `ngx_stub.h`.
 
 | File | Role |
 |---|---|
-| `nginx_url.c` | The 3 verbatim regions + the `nginx_parse_origin_form()` wrapper (generated) |
-| `ngx_stub.h` | Minimal type/macro shim (a struct with only the fields the two functions touch) |
+| `nginx_url.c` | The 4 verbatim regions + the `nginx_parse_origin_form()` wrapper (generated) |
+| `ngx_stub.h` | Minimal type/macro shim for the extracted functions |
 | `tools/extract.sh` | Regenerates the extracted regions from nginx |
 | `Makefile` | Build / self-test / regenerate / verify |
 | `selftest.c` | A small sanity test |
@@ -169,6 +171,9 @@ Compare the three return states directly against your own crate's result:
    identical, including absent versus present-but-empty query strings.
 2. `Ok(None)` -> your implementation must also **reject** the input.
 3. Randomize `merge_slashes: bool` too, to cover both dimensions.
+
+Before parsing inputs, the fuzzer also compares `PATH_ESCAPE_SET` with
+`ngx_escape_uri(..., NGX_ESCAPE_URI)` for all 256 possible byte values.
 
 ```rust
 // libfuzzer-sys target example

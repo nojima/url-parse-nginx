@@ -6,6 +6,8 @@
 //!   - both accept  -> normalized path and query string must match
 //!   - both reject  -> ok
 //!   - disagreement -> print the failing input and exit non-zero
+//! It also checks `PATH_ESCAPE_SET` against nginx's real `ngx_escape_uri()` for
+//! every possible byte value.
 //!
 //! Usage:  fuzz [iterations] [seed]
 //!   iterations  number of random inputs (default 5_000_000)
@@ -16,6 +18,8 @@ use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::process::ExitCode;
 
 extern "C" {
+    fn ngx_escape_uri(dst: *mut u8, src: *mut u8, size: usize, kind: usize) -> usize;
+
     fn nginx_parse_origin_form(
         input: *const u8,
         in_len: usize,
@@ -27,6 +31,46 @@ extern "C" {
         args_len: *mut usize,
         args_present: *mut i32,
     ) -> i32;
+}
+
+/// Run nginx's real `ngx_escape_uri(..., NGX_ESCAPE_URI)`.
+fn c_escape_path(input: &[u8]) -> Vec<u8> {
+    let mut out = vec![0u8; input.len().checked_mul(3).unwrap()];
+    let out_ptr = out.as_mut_ptr();
+    let end = unsafe {
+        ngx_escape_uri(
+            out_ptr,
+            input.as_ptr() as *mut u8,
+            input.len(),
+            0, // NGX_ESCAPE_URI
+        )
+    };
+    let out_len = end
+        .checked_sub(out_ptr as usize)
+        .filter(|&len| len <= out.len())
+        .unwrap_or_else(|| panic!("ngx_escape_uri returned invalid end pointer {end:#x}"));
+    out.truncate(out_len);
+    out
+}
+
+/// Check the complete byte-to-escape mapping, including `%HH` hex casing.
+fn check_path_escape_set() -> bool {
+    for byte in 0..=u8::MAX {
+        let input = [byte];
+        let c = c_escape_path(&input);
+        let rust = percent_encoding::percent_encode(&input, url_parse_nginx::PATH_ESCAPE_SET)
+            .to_string()
+            .into_bytes();
+
+        if c != rust {
+            eprintln!("\n=== PATH_ESCAPE_SET DIVERGENCE ===");
+            eprintln!("input byte:  0x{byte:02x}");
+            eprintln!("nginx:       {}", escape(&c));
+            eprintln!("Rust:        {}", escape(&rust));
+            return false;
+        }
+    }
+    true
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -202,6 +246,11 @@ fn main() -> ExitCode {
         .next()
         .and_then(|s| s.parse().ok())
         .unwrap_or(0x9E37_79B9_7F4A_7C15);
+
+    if !check_path_escape_set() {
+        return ExitCode::FAILURE;
+    }
+    eprintln!("PATH_ESCAPE_SET (all 256 byte values): OK");
 
     // 1) Fixed corpus of tricky cases — always exercised first.
     let corpus: &[&[u8]] = &[

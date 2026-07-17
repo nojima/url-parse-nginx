@@ -1,11 +1,11 @@
 /*
  * Minimal nginx type/macro shim for the URL-path normalization fuzz harness.
  *
- * This provides ONLY the definitions that ngx_http_parse_uri() and
- * ngx_http_parse_complex_uri() actually reference (Linux, NGX_WIN32 and
- * NGX_DEBUG undefined). It is deliberately NOT a copy of nginx's headers:
- * the two parser functions call no other nginx function, so a tiny struct
- * is enough to run them verbatim.
+ * This provides ONLY the definitions that ngx_http_parse_uri(),
+ * ngx_http_parse_complex_uri(), and ngx_escape_uri() actually reference
+ * (Linux, NGX_WIN32 and NGX_DEBUG undefined). It is deliberately NOT a copy
+ * of nginx's headers: the extracted functions call no other nginx function,
+ * so a tiny struct is enough to run them verbatim.
  *
  * If you bump the vendored nginx version, re-verify the field set with:
  *   sed -n '1148,1296p;1299,1672p' src/http/ngx_http_parse.c \
@@ -38,6 +38,7 @@ typedef struct {
 #define NGX_OK                              0
 #define NGX_ERROR                          -1
 #define NGX_HTTP_PARSE_INVALID_REQUEST     10
+#define NGX_ESCAPE_URI                      0
 
 /* ngx_log_debug3() is the only "call" in parse_complex_uri; make it vanish.
  * Because it is a no-op, NGX_LOG_DEBUG_HTTP and r->connection are never
@@ -70,5 +71,7 @@ typedef struct {
 ngx_int_t ngx_http_parse_uri(ngx_http_request_t *r);
 ngx_int_t ngx_http_parse_complex_uri(ngx_http_request_t *r,
     ngx_uint_t merge_slashes);
+uintptr_t ngx_escape_uri(u_char *dst, u_char *src, size_t size,
+    ngx_uint_t type);
 
 #endif /* NGX_STUB_H */

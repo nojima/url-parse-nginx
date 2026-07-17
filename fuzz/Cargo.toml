@@ -12,6 +12,7 @@ name = "fuzz"
 path = "src/main.rs"
 
 [dependencies]
+percent-encoding = { version = "2", default-features = false }
 url-parse-nginx = { path = ".." }
 
 [build-dependencies]

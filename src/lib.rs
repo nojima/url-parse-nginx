@@ -23,12 +23,6 @@
 //! percent-decodes `%XX`, resolves `.` and `..` segments, and optionally merges
 //! adjacent slashes.
 //!
-//! Some nginx processing paths, including some `proxy_pass` cases, first
-//! normalize and percent-decode the request path, then percent-encode the
-//! normalized path again. To reproduce this decode-then-encode flow, pass
-//! [`Parsed::path`] to `percent_encoding::percent_encode` with
-//! [`PATH_ESCAPE_SET`].
-//!
 //! [Origin-form] is the usual HTTP request-target format: a path starting
 //! with `/`, optionally followed by `?` and a query string, such as
 //! `/search?q=rust`.
@@ -38,6 +32,12 @@
 //! asterisk-form (`*`), are not supported.
 //! The parsing behavior follows nginx on Linux; Windows-specific nginx
 //! behavior is not supported.
+//!
+//! Some nginx processing paths, including some `proxy_pass` cases, first
+//! normalize and percent-decode the request path, then percent-encode the
+//! normalized path again. To reproduce this decode-then-encode flow, pass
+//! [`Parsed::path`] to `percent_encoding::percent_encode` with
+//! [`PATH_ESCAPE_SET`].
 //!
 //! [Origin-form]: https://www.rfc-editor.org/rfc/rfc9112.html#section-3.2.1
 //!
