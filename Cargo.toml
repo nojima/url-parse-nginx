@@ -5,7 +5,7 @@ edition = "2021"
 description = "A faithful, 1-to-1 Rust port of nginx's URL path parser (ngx_http_parse_uri / ngx_http_parse_complex_uri) for origin-form paths."
 license = "BSD-2-Clause"
 readme = "README.md"
-# repository = "https://github.com/<owner>/url-parse-nginx"  # set once the repo exists
+repository = "https://github.com/nojima/url-parse-nginx"
 keywords = ["nginx", "url", "uri", "path", "normalization"]
 categories = ["parser-implementations", "web-programming"]
 # Dev-only tooling (differential fuzzer, benchmark, and the C harness they
