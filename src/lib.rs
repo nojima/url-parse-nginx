@@ -160,6 +160,10 @@ pub struct Parsed<'a> {
     /// The normalized path, corresponding to nginx's `$uri` variable before
     /// any later rewrite processing. The query string is excluded.
     ///
+    /// `/../` segments are removed by resolving the preceding segment, and
+    /// percent-encoded bytes are decoded. For example,
+    /// `/a/../hello%20world` becomes `/hello world`.
+    ///
     /// A path that needs no normalization borrows the input unchanged
     /// ([`Cow::Borrowed`], no allocation); a normalized path is owned
     /// ([`Cow::Owned`]).
@@ -692,9 +696,8 @@ fn ngx_http_parse_complex_uri(
 
 /// Parse a single origin-form request target exactly as nginx does.
 ///
-/// The returned values correspond to the initial values nginx exposes through
-/// its `$uri` and `$args` variables. nginx may subsequently change these
-/// variables during request processing.
+/// The returned values correspond to the values nginx exposes through
+/// its `$uri` and `$args` variables.
 ///
 /// * `Ok(`[`Parsed`]`)` — the normalized path and query string. For a "simple"
 ///   path that needs no normalization, the path borrows the input unchanged
