@@ -1,0 +1,22 @@
+[package]
+name = "difffuzz"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Differential fuzzer: compares the Rust port against the real nginx code
+# (compiled from ../../url-fuzz-harness/nginx_url.c) on random inputs.
+
+[[bin]]
+name = "difffuzz"
+path = "src/main.rs"
+
+[dependencies]
+url-parse-nginx = { path = ".." }
+
+[build-dependencies]
+cc = "1"
+
+[profile.release]
+debug = true          # keep overflow checks off but symbols on
+overflow-checks = true # a Rust arithmetic overflow is itself a finding

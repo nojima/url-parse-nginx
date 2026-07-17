@@ -1,0 +1,21 @@
+# --- Rust ---
+# Build output (matches ./target and difffuzz/target).
+target/
+
+# Cargo.lock is not committed for a library crate; downstream builds resolve
+# their own versions. (Drop this line if you decide to pin difffuzz builds.)
+Cargo.lock
+
+# --- C fuzz harness build artifacts (url-fuzz-harness) ---
+*.o
+*.so
+url-fuzz-harness/selftest
+
+# nginx source is fetched on demand by tools/extract.sh into a temp dir and
+# removed afterwards; nothing to ignore. A locally cached tarball, if any:
+*.tar.gz
+
+# --- editor / OS ---
+*.swp
+*~
+.DS_Store
