@@ -69,6 +69,27 @@ fn usual(ch: u8) -> bool {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParseError;
 
+/// The result of normalizing an origin-form request target — the `r->uri` and
+/// `r->args` that nginx derives in `ngx_http_process_request_uri`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Normalized<'a> {
+    /// The normalized path (nginx's `r->uri`), query string excluded.
+    ///
+    /// A path that needs no normalization borrows the input unchanged
+    /// ([`Cow::Borrowed`], no allocation); a normalized path is owned
+    /// ([`Cow::Owned`]).
+    pub path: Cow<'a, [u8]>,
+
+    /// The query string (nginx's `r->args`): the bytes after the first `?`, up
+    /// to a `#` fragment or the end of the target. It always borrows the input
+    /// — nginx never rewrites the query string.
+    ///
+    /// `None` when the target has no query component (nginx's `r->args.data` is
+    /// NULL), which includes a trailing `?` with nothing after it (`"/a?"`).
+    /// `Some(b"")` marks a present-but-empty query, e.g. the one in `"/a?#f"`.
+    pub args: Option<&'a [u8]>,
+}
+
 /// A `{len, data-offset}` pair mirroring nginx's `ngx_str_t`. The base of
 /// `data` (input vs output buffer) depends on the field, exactly as in C.
 #[derive(Debug, Default, Clone, Copy)]
@@ -579,20 +600,19 @@ fn ngx_http_parse_complex_uri(
     finish_done(r, u)
 }
 
-/// Normalize a single origin-form path exactly as nginx does.
+/// Normalize a single origin-form request target exactly as nginx does.
 ///
-/// Mirrors the `nginx_normalize_path` wrapper in `nginx-reference`, which
-/// reproduces the Linux path of `ngx_http_process_request_uri()`:
+/// Mirrors the Linux path of `ngx_http_process_request_uri()`:
 ///
-/// * `Ok(path)` — the normalized path bytes (query string excluded, matching
-///   `r->uri`). For a "simple" path that needs no normalization this borrows
-///   the input unchanged ([`Cow::Borrowed`]) — no allocation — just as nginx
-///   returns the original bytes. Normalization returns an owned buffer
-///   ([`Cow::Owned`]).
-/// * `Err(ParseError)` — nginx rejected the path.
+/// * `Ok(`[`Normalized`]`)` — the normalized path (`r->uri`) and query string
+///   (`r->args`). For a "simple" path that needs no normalization the path
+///   borrows the input unchanged ([`Cow::Borrowed`]) — no allocation — just as
+///   nginx returns the original bytes; normalization returns an owned buffer
+///   ([`Cow::Owned`]). The query string always borrows the input.
+/// * `Err(ParseError)` — nginx rejected the target.
 ///
 /// `merge_slashes` corresponds to `cscf->merge_slashes` (nginx default: `true`).
-pub fn normalize_path(input: &[u8], merge_slashes: bool) -> Result<Cow<'_, [u8]>, ParseError> {
+pub fn normalize_path(input: &[u8], merge_slashes: bool) -> Result<Normalized<'_>, ParseError> {
     let mut r = Request {
         uri_start: 0,
         uri_end: input.len(),
@@ -604,7 +624,7 @@ pub fn normalize_path(input: &[u8], merge_slashes: bool) -> Result<Cow<'_, [u8]>
     // sentinel, no allocation.
     ngx_http_parse_uri(&mut r, input)?;
 
-    if r.complex_uri || r.quoted_uri || r.empty_path_in_uri {
+    let path = if r.complex_uri || r.quoted_uri || r.empty_path_in_uri {
         // stage 2 reads one byte past the URI (`buf[uri_end]`), relying on
         // nginx's invariant that a readable byte (the LF) always follows.
         // Materialize that only here, where normalization actually happens:
@@ -618,7 +638,7 @@ pub fn normalize_path(input: &[u8], merge_slashes: bool) -> Result<Cow<'_, [u8]>
         let mut out = vec![0u8; input.len() + 1];
         ngx_http_parse_complex_uri(&mut r, &buf, &mut out, merge_slashes)?;
         out.truncate(r.uri.len);
-        Ok(Cow::Owned(out))
+        Cow::Owned(out)
     } else {
         // "simple" path: returned unchanged, query string excluded — borrow the
         // input directly, no allocation.
@@ -626,7 +646,40 @@ pub fn normalize_path(input: &[u8], merge_slashes: bool) -> Result<Cow<'_, [u8]>
             Some(a) => a - 1 - r.uri_start,
             None => r.uri_end - r.uri_start,
         };
-        Ok(Cow::Borrowed(&input[r.uri_start..r.uri_start + len]))
+        Cow::Borrowed(&input[r.uri_start..r.uri_start + len])
+    };
+
+    Ok(Normalized {
+        path,
+        args: normalized_args(&r, input),
+    })
+}
+
+/// Compute nginx's `r->args` for a parsed target, mirroring the trailing args
+/// assignment in `ngx_http_process_request_uri`:
+///
+/// ```c
+/// if (r->args_start && r->uri_end > r->args_start) {
+///     r->args.len  = r->uri_end - r->args_start;
+///     r->args.data = r->args_start;
+/// }
+/// ```
+///
+/// When a complex URI delimits the query with a `#`, `ngx_http_parse_complex_uri`
+/// has already recorded `r.args` and cleared `args_start`; that case skips the
+/// block above, exactly as the NULL `args_start` does in nginx.
+fn normalized_args<'a>(r: &Request, input: &'a [u8]) -> Option<&'a [u8]> {
+    // `args.data` is an offset just after a '?', always >= 2 for origin-form
+    // input (the path starts with '/'), so 0 is nginx's NULL sentinel. A
+    // non-zero `data` means parse_complex_uri delimited the query at a '#'
+    // (possibly empty, e.g. "/a?#f").
+    if r.args.data != 0 {
+        return Some(&input[r.args.data..r.args.data + r.args.len]);
+    }
+    // Otherwise the query, if any, runs from `args_start` to the end of input.
+    match r.args_start {
+        Some(a) if r.uri_end > a => Some(&input[a..r.uri_end]),
+        _ => None,
     }
 }
 
@@ -635,7 +688,16 @@ mod tests {
     use super::*;
 
     fn norm(s: &str, merge: bool) -> Result<String, ParseError> {
-        normalize_path(s.as_bytes(), merge).map(|v| String::from_utf8(v.into_owned()).unwrap())
+        normalize_path(s.as_bytes(), merge)
+            .map(|n| String::from_utf8(n.path.into_owned()).unwrap())
+    }
+
+    /// The query string as an `Option<&str>` (`None` == no query component).
+    fn args(s: &str, merge: bool) -> Option<String> {
+        normalize_path(s.as_bytes(), merge)
+            .unwrap()
+            .args
+            .map(|a| String::from_utf8(a.to_vec()).unwrap())
     }
 
     #[test]
@@ -686,12 +748,12 @@ mod tests {
     fn simple_path_borrows_input() {
         // A path needing no normalization must not allocate.
         assert!(matches!(
-            normalize_path(b"/foo/bar", true).unwrap(),
+            normalize_path(b"/foo/bar", true).unwrap().path,
             Cow::Borrowed(_)
         ));
         // The query string is excluded, still by borrowing.
         assert!(matches!(
-            normalize_path(b"/foo?a=1", true).unwrap(),
+            normalize_path(b"/foo?a=1", true).unwrap().path,
             Cow::Borrowed(_)
         ));
     }
@@ -699,12 +761,44 @@ mod tests {
     #[test]
     fn normalized_path_is_owned() {
         assert!(matches!(
-            normalize_path(b"/foo/../bar", true).unwrap(),
+            normalize_path(b"/foo/../bar", true).unwrap().path,
             Cow::Owned(_)
         ));
         assert!(matches!(
-            normalize_path(b"/%66oo", true).unwrap(),
+            normalize_path(b"/%66oo", true).unwrap().path,
             Cow::Owned(_)
         ));
+    }
+
+    #[test]
+    fn args_returned() {
+        // No query component.
+        assert_eq!(args("/foo", true), None);
+        assert_eq!(args("/foo/../bar", true), None); // complex, still no query
+
+        // Simple path with a query.
+        assert_eq!(args("/foo?a=1", true).as_deref(), Some("a=1"));
+        // Complex path (normalized) with a query, terminated by end of input.
+        assert_eq!(args("/foo/../bar?x=%20", true).as_deref(), Some("x=%20"));
+
+        // A '#' fragment terminates the query (and the fragment is dropped).
+        assert_eq!(args("/foo?a=1#frag", true).as_deref(), Some("a=1"));
+
+        // Trailing '?' with nothing after it: nginx leaves r->args.data NULL.
+        assert_eq!(args("/foo?", true), None);
+        // Present-but-empty query: '?' immediately followed by '#'.
+        assert_eq!(args("/foo?#frag", true).as_deref(), Some(""));
+
+        // The query string is never normalized, even when the path is.
+        assert_eq!(args("/a/../b?p=%2e%2e", true).as_deref(), Some("p=%2e%2e"));
+    }
+
+    #[test]
+    fn args_borrow_input() {
+        // args always borrows the input (Option<&[u8]>, no allocation).
+        let input = b"/foo?a=1";
+        let n = normalize_path(input, true).unwrap();
+        let a = n.args.unwrap();
+        assert!(std::ptr::eq(a.as_ptr(), input[5..].as_ptr()));
     }
 }

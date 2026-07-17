@@ -30,17 +30,24 @@ use std::borrow::Cow;
 use url_parse_nginx::normalize_path;
 
 // merge_slashes = true matches nginx's default (cscf->merge_slashes).
-// The result is a Cow<[u8]>; deref (&*) to compare against a byte slice.
-assert_eq!(&*normalize_path(b"/a/./b/../c", true).unwrap(), b"/c");
-assert_eq!(&*normalize_path(b"/%66oo", true).unwrap(), b"/foo");
-assert_eq!(&*normalize_path(b"/a//b", true).unwrap(), b"/a/b");
-assert_eq!(&*normalize_path(b"/a//b", false).unwrap(), b"/a//b");
+// The result is a `Normalized { path: Cow<[u8]>, args: Option<&[u8]> }`.
+// Deref the path (&*) to compare against a byte slice.
+assert_eq!(&*normalize_path(b"/a/./b/../c", true).unwrap().path, b"/c");
+assert_eq!(&*normalize_path(b"/%66oo", true).unwrap().path, b"/foo");
+assert_eq!(&*normalize_path(b"/a//b", true).unwrap().path, b"/a/b");
+assert_eq!(&*normalize_path(b"/a//b", false).unwrap().path, b"/a//b");
 
-// The query string is excluded, exactly like nginx's r->uri.
-assert_eq!(&*normalize_path(b"/foo/../bar?x=1", true).unwrap(), b"/bar");
+// The path excludes the query string (exactly like nginx's r->uri); the query
+// is returned separately in `args` (like r->args), and is never normalized.
+let n = normalize_path(b"/foo/../bar?x=1", true).unwrap();
+assert_eq!(&*n.path, b"/bar");
+assert_eq!(n.args, Some(&b"x=1"[..]));
+
+// No query component -> args is None.
+assert_eq!(normalize_path(b"/foo", true).unwrap().args, None);
 
 // A "simple" path that needs no normalization borrows the input — no allocation.
-assert!(matches!(normalize_path(b"/foo/bar", true).unwrap(), Cow::Borrowed(_)));
+assert!(matches!(normalize_path(b"/foo/bar", true).unwrap().path, Cow::Borrowed(_)));
 
 // Paths nginx rejects return Err (e.g. escaping above the root).
 assert!(normalize_path(b"/../", true).is_err());
@@ -48,11 +55,16 @@ assert!(normalize_path(b"/../", true).is_err());
 
 `normalize_path` returns:
 
-- `Ok(path)` — the normalized path as a `Cow<[u8]>`. A path that needs no
-  normalization borrows the input unchanged (`Cow::Borrowed`, query string
-  excluded) with no allocation, exactly as nginx returns the original bytes;
-  a path that is normalized returns an owned buffer (`Cow::Owned`).
-- `Err(ParseError)` — nginx rejected the path (invalid request).
+- `Ok(Normalized { path, args })`:
+  - `path: Cow<[u8]>` — the normalized path (nginx's `r->uri`, query string
+    excluded). A path that needs no normalization borrows the input unchanged
+    (`Cow::Borrowed`) with no allocation, exactly as nginx returns the original
+    bytes; a normalized path returns an owned buffer (`Cow::Owned`).
+  - `args: Option<&[u8]>` — the query string (nginx's `r->args`): the bytes
+    after the first `?`, up to a `#` fragment or the end of the target. It
+    always borrows the input (the query is never normalized). `None` when there
+    is no query component; `Some(b"")` marks a present-but-empty query (`/a?#f`).
+- `Err(ParseError)` — nginx rejected the target (invalid request).
 
 ## How the equivalence is verified
 

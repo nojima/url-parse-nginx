@@ -49,11 +49,12 @@ fn c_normalize(input: &[u8], merge: bool) -> Option<Vec<u8>> {
     }
 }
 
-/// Call the Rust port. `None` == rejected.
+/// Call the Rust port. `None` == rejected. The C reference only exposes the
+/// normalized path (`r->uri`), so we compare `path` and ignore `args` here.
 fn rust_normalize(input: &[u8], merge: bool) -> Option<Vec<u8>> {
     url_parse_nginx::normalize_path(input, merge)
         .ok()
-        .map(|cow| cow.into_owned())
+        .map(|n| n.path.into_owned())
 }
 
 /// xorshift64* PRNG (deterministic, reproducible from the seed).
