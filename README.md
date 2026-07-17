@@ -26,16 +26,21 @@ fuzzer that runs the real nginx C code against this port (see below).
 ## Usage
 
 ```rust
+use std::borrow::Cow;
 use url_parse_nginx::normalize_path;
 
 // merge_slashes = true matches nginx's default (cscf->merge_slashes).
-assert_eq!(normalize_path(b"/a/./b/../c", true).unwrap(), b"/c");
-assert_eq!(normalize_path(b"/%66oo", true).unwrap(), b"/foo");
-assert_eq!(normalize_path(b"/a//b", true).unwrap(), b"/a/b");
-assert_eq!(normalize_path(b"/a//b", false).unwrap(), b"/a//b");
+// The result is a Cow<[u8]>; deref (&*) to compare against a byte slice.
+assert_eq!(&*normalize_path(b"/a/./b/../c", true).unwrap(), b"/c");
+assert_eq!(&*normalize_path(b"/%66oo", true).unwrap(), b"/foo");
+assert_eq!(&*normalize_path(b"/a//b", true).unwrap(), b"/a/b");
+assert_eq!(&*normalize_path(b"/a//b", false).unwrap(), b"/a//b");
 
 // The query string is excluded, exactly like nginx's r->uri.
-assert_eq!(normalize_path(b"/foo/../bar?x=1", true).unwrap(), b"/bar");
+assert_eq!(&*normalize_path(b"/foo/../bar?x=1", true).unwrap(), b"/bar");
+
+// A "simple" path that needs no normalization borrows the input — no allocation.
+assert!(matches!(normalize_path(b"/foo/bar", true).unwrap(), Cow::Borrowed(_)));
 
 // Paths nginx rejects return Err (e.g. escaping above the root).
 assert!(normalize_path(b"/../", true).is_err());
@@ -43,9 +48,10 @@ assert!(normalize_path(b"/../", true).is_err());
 
 `normalize_path` returns:
 
-- `Ok(path)` — the normalized path bytes. For a path that needs no
-  normalization, this is the input unchanged (query string excluded), exactly
-  as nginx returns the original bytes.
+- `Ok(path)` — the normalized path as a `Cow<[u8]>`. A path that needs no
+  normalization borrows the input unchanged (`Cow::Borrowed`, query string
+  excluded) with no allocation, exactly as nginx returns the original bytes;
+  a path that is normalized returns an owned buffer (`Cow::Owned`).
 - `Err(ParseError)` — nginx rejected the path (invalid request).
 
 ## How the equivalence is verified

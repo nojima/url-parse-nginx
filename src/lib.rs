@@ -42,6 +42,8 @@
 //!   after the URI": stage 2 reads one byte at `uri_end`. [`normalize_path`]
 //!   reproduces this by appending a trailing `\n` sentinel to the input copy.
 
+use std::borrow::Cow;
+
 /// nginx's `usual[]` bitmap (`ngx_http_parse.c`), non-`NGX_WIN32` variant.
 ///
 /// Bit `1` marks an "ordinary" URI character that needs no special handling.
@@ -583,40 +585,48 @@ fn ngx_http_parse_complex_uri(
 /// reproduces the Linux path of `ngx_http_process_request_uri()`:
 ///
 /// * `Ok(path)` — the normalized path bytes (query string excluded, matching
-///   `r->uri`). For a "simple" path that needs no normalization this is the
-///   input unchanged, just as nginx returns the original bytes.
+///   `r->uri`). For a "simple" path that needs no normalization this borrows
+///   the input unchanged ([`Cow::Borrowed`]) — no allocation — just as nginx
+///   returns the original bytes. Normalization returns an owned buffer
+///   ([`Cow::Owned`]).
 /// * `Err(ParseError)` — nginx rejected the path.
 ///
 /// `merge_slashes` corresponds to `cscf->merge_slashes` (nginx default: `true`).
-pub fn normalize_path(input: &[u8], merge_slashes: bool) -> Result<Vec<u8>, ParseError> {
-    // nginx invariant: a readable byte (the LF) always follows the URI.
-    let mut buf = Vec::with_capacity(input.len() + 1);
-    buf.extend_from_slice(input);
-    buf.push(b'\n');
-
+pub fn normalize_path(input: &[u8], merge_slashes: bool) -> Result<Cow<'_, [u8]>, ParseError> {
     let mut r = Request {
         uri_start: 0,
         uri_end: input.len(),
         ..Request::default()
     };
 
-    // stage 1
-    ngx_http_parse_uri(&mut r, &buf)?;
+    // stage 1: never reads past the input (the loop stops at `uri_end` and does
+    // not touch `buf[uri_end]`), so it runs directly on `input` — no copy, no
+    // sentinel, no allocation.
+    ngx_http_parse_uri(&mut r, input)?;
 
     if r.complex_uri || r.quoted_uri || r.empty_path_in_uri {
-        // stage 2: normalization. Output never exceeds input length; +1
-        // covers the (origin-form-unreachable) empty-path leading slash.
+        // stage 2 reads one byte past the URI (`buf[uri_end]`), relying on
+        // nginx's invariant that a readable byte (the LF) always follows.
+        // Materialize that only here, where normalization actually happens:
+        // copy the input and append the '\n' sentinel.
+        let mut buf = Vec::with_capacity(input.len() + 1);
+        buf.extend_from_slice(input);
+        buf.push(b'\n');
+
+        // Output never exceeds input length; +1 covers the
+        // (origin-form-unreachable) empty-path leading slash.
         let mut out = vec![0u8; input.len() + 1];
         ngx_http_parse_complex_uri(&mut r, &buf, &mut out, merge_slashes)?;
         out.truncate(r.uri.len);
-        Ok(out)
+        Ok(Cow::Owned(out))
     } else {
-        // "simple" path: returned unchanged, query string excluded.
+        // "simple" path: returned unchanged, query string excluded — borrow the
+        // input directly, no allocation.
         let len = match r.args_start {
             Some(a) => a - 1 - r.uri_start,
             None => r.uri_end - r.uri_start,
         };
-        Ok(input[r.uri_start..r.uri_start + len].to_vec())
+        Ok(Cow::Borrowed(&input[r.uri_start..r.uri_start + len]))
     }
 }
 
@@ -625,7 +635,7 @@ mod tests {
     use super::*;
 
     fn norm(s: &str, merge: bool) -> Result<String, ParseError> {
-        normalize_path(s.as_bytes(), merge).map(|v| String::from_utf8(v).unwrap())
+        normalize_path(s.as_bytes(), merge).map(|v| String::from_utf8(v.into_owned()).unwrap())
     }
 
     #[test]
@@ -670,5 +680,31 @@ mod tests {
     #[test]
     fn empty() {
         assert_eq!(norm("", true).unwrap(), "");
+    }
+
+    #[test]
+    fn simple_path_borrows_input() {
+        // A path needing no normalization must not allocate.
+        assert!(matches!(
+            normalize_path(b"/foo/bar", true).unwrap(),
+            Cow::Borrowed(_)
+        ));
+        // The query string is excluded, still by borrowing.
+        assert!(matches!(
+            normalize_path(b"/foo?a=1", true).unwrap(),
+            Cow::Borrowed(_)
+        ));
+    }
+
+    #[test]
+    fn normalized_path_is_owned() {
+        assert!(matches!(
+            normalize_path(b"/foo/../bar", true).unwrap(),
+            Cow::Owned(_)
+        ));
+        assert!(matches!(
+            normalize_path(b"/%66oo", true).unwrap(),
+            Cow::Owned(_)
+        ));
     }
 }
