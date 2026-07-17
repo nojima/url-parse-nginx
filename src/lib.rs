@@ -101,7 +101,7 @@ pub struct Parsed<'a> {
 /// A `{len, data-offset}` pair mirroring nginx's `ngx_str_t`. The base of
 /// `data` (input vs output buffer) depends on the field, exactly as in C.
 #[derive(Debug, Default, Clone, Copy)]
-struct Str {
+struct NgxStr {
     len: usize,
     data: usize,
 }
@@ -110,9 +110,9 @@ struct Str {
 #[derive(Debug, Default)]
 struct Request {
     // outputs
-    uri: Str,   // len = normalized path length; data = output-buffer offset
-    args: Str,  // data = input offset (query string)
-    exten: Str, // data = output offset (extension)
+    uri: NgxStr,   // len = normalized path length; data = output-buffer offset
+    args: NgxStr,  // data = input offset (query string)
+    exten: NgxStr, // data = output offset (extension)
 
     uri_ext: Option<usize>,
     args_start: Option<usize>,
