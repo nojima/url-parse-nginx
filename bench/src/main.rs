@@ -108,7 +108,7 @@ fn main() {
         // Cross-check agreement before timing (a benchmark of divergent code
         // would be meaningless).
         let c_res = c_normalize(&c.input, c.merge, &mut out).map(|n| out[..n].to_vec());
-        let r_res = url_parse_nginx::normalize_path(&c.input, c.merge)
+        let r_res = url_parse_nginx::parse_path_and_query(&c.input, c.merge)
             .ok()
             .map(|n| n.path.into_owned());
         assert_eq!(c_res, r_res, "C/Rust divergence on bench case {:?}", c.name);
@@ -120,7 +120,7 @@ fn main() {
         });
 
         let r_ns = bench(iters, rounds, || {
-            let n = url_parse_nginx::normalize_path(black_box(&c.input), c.merge).unwrap();
+            let n = url_parse_nginx::parse_path_and_query(black_box(&c.input), c.merge).unwrap();
             black_box(n.path.len());
             black_box(n.path.as_ptr());
             black_box(n.args);
