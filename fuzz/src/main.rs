@@ -3,7 +3,7 @@
 //! For each generated input and both `merge_slashes` values, run nginx's real
 //! `ngx_http_parse_uri` + `ngx_http_parse_complex_uri` (via the C harness) and
 //! the Rust port, then assert the results are identical:
-//!   - both accept  -> normalized bytes must match
+//!   - both accept  -> normalized path and query string must match
 //!   - both reject  -> ok
 //!   - disagreement -> print the failing input and exit non-zero
 //!
@@ -11,50 +11,94 @@
 //!   iterations  number of random inputs (default 5_000_000)
 //!   seed        u64 PRNG seed (default 0x9E3779B97F4A7C15)
 
+use std::borrow::Cow;
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::process::ExitCode;
 
 extern "C" {
-    fn nginx_normalize_path(
+    fn nginx_parse_path_and_query(
         input: *const u8,
         in_len: usize,
         merge_slashes: i32,
         out: *mut u8,
         out_cap: usize,
         out_len: *mut usize,
+        args_offset: *mut usize,
+        args_len: *mut usize,
+        args_present: *mut i32,
     ) -> i32;
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct ParseResult<'a> {
+    path: Cow<'a, [u8]>,
+    args: Option<&'a [u8]>,
+}
+
 /// Call the real nginx code. `None` == rejected (rc -1).
-fn c_normalize(input: &[u8], merge: bool) -> Option<Vec<u8>> {
+///
+/// The C wrapper returns `args` as an offset and length into `input`, so
+/// exposing it as a slice requires no additional allocation.
+fn c_parse(input: &[u8], merge: bool) -> Option<ParseResult<'_>> {
     let mut out = vec![0u8; input.len() + 1];
     let mut out_len = 0usize;
+    let mut args_offset = 0usize;
+    let mut args_len = 0usize;
+    let mut args_present = 0i32;
     let rc = unsafe {
-        nginx_normalize_path(
+        nginx_parse_path_and_query(
             input.as_ptr(),
             input.len(),
             merge as i32,
             out.as_mut_ptr(),
             out.len(),
             &mut out_len,
+            &mut args_offset,
+            &mut args_len,
+            &mut args_present,
         )
     };
     match rc {
         0 => {
             out.truncate(out_len);
-            Some(out)
+            let args = match args_present {
+                0 => None,
+                1 => {
+                    let args_end = args_offset
+                        .checked_add(args_len)
+                        .filter(|&end| end <= input.len())
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "C harness returned invalid args range \
+                                 {args_offset}..+{args_len} for input length {}",
+                                input.len()
+                            )
+                        });
+                    Some(&input[args_offset..args_end])
+                }
+                other => panic!(
+                    "C harness returned unexpected args_present={other} for {:?}",
+                    input
+                ),
+            };
+            Some(ParseResult {
+                path: Cow::Owned(out),
+                args,
+            })
         }
         -1 => None,
         other => panic!("C harness returned unexpected rc={other} for {:?}", input),
     }
 }
 
-/// Call the Rust port. `None` == rejected. The C reference only exposes the
-/// normalized path (`r->uri`), so we compare `path` and ignore `args` here.
-fn rust_normalize(input: &[u8], merge: bool) -> Option<Vec<u8>> {
+/// Call the Rust port. `None` == rejected.
+fn rust_parse(input: &[u8], merge: bool) -> Option<ParseResult<'_>> {
     url_parse_nginx::parse_path_and_query(input, merge)
         .ok()
-        .map(|n| n.path.into_owned())
+        .map(|parsed| ParseResult {
+            path: parsed.path,
+            args: parsed.args,
+        })
 }
 
 /// xorshift64* PRNG (deterministic, reproducible from the seed).
@@ -98,8 +142,8 @@ fn gen_input(rng: &mut Rng, buf: &mut Vec<u8>) {
 
 /// Returns true on agreement; prints details and returns false on divergence.
 fn check(input: &[u8], merge: bool) -> bool {
-    let c = catch_unwind(AssertUnwindSafe(|| c_normalize(input, merge)));
-    let r = catch_unwind(AssertUnwindSafe(|| rust_normalize(input, merge)));
+    let c = catch_unwind(AssertUnwindSafe(|| c_parse(input, merge)));
+    let r = catch_unwind(AssertUnwindSafe(|| rust_parse(input, merge)));
 
     match (c, r) {
         (Ok(c), Ok(r)) if c == r => true,
@@ -115,11 +159,23 @@ fn check(input: &[u8], merge: bool) -> bool {
     }
 }
 
-fn fmt_res(r: &std::thread::Result<Option<Vec<u8>>>) -> String {
+fn fmt_res(r: &std::thread::Result<Option<ParseResult<'_>>>) -> String {
     match r {
-        Ok(Some(v)) => format!("Ok({:?})  = {}", v, escape(v)),
+        Ok(Some(parsed)) => format!(
+            "Ok {{ path: {:?} = {}, args: {} }}",
+            parsed.path,
+            escape(&parsed.path),
+            fmt_args(parsed.args)
+        ),
         Ok(None) => "Rejected".to_string(),
         Err(_) => "PANIC".to_string(),
+    }
+}
+
+fn fmt_args(args: Option<&[u8]>) -> String {
+    match args {
+        Some(args) => format!("Some({args:?} = {})", escape(args)),
+        None => "None".to_string(),
     }
 }
 
@@ -152,8 +208,9 @@ fn main() -> ExitCode {
         b"", b"/", b"//", b"///", b"/.", b"/..", b"/../", b"/./", b"/a/./b",
         b"/a/../b", b"/a/b/../../c", b"/a/b/../../../c", b"/%2e%2e/", b"/%2f",
         b"/a%2fb", b"/%00", b"/foo?bar", b"/foo#frag", b"/foo?a=b#c", b"/+",
-        b"/%20", b"/a..b", b"/...", b"/....", b"/a/..", b"relative", b"/%zz",
-        b"/%2", b"/a%", b"/\\", b"/a\\b", b"/.%2e/", b"/%2e./",
+        b"/foo?", b"/foo?#frag", b"/foo?x=%20", b"/%20", b"/a..b", b"/...",
+        b"/....", b"/a/..", b"relative", b"/%zz", b"/%2", b"/a%", b"/\\",
+        b"/a\\b", b"/.%2e/", b"/%2e./",
     ];
     for input in corpus {
         for &merge in &[true, false] {

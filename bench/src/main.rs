@@ -16,13 +16,16 @@ use std::hint::black_box;
 use std::time::Instant;
 
 extern "C" {
-    fn nginx_normalize_path(
+    fn nginx_parse_path_and_query(
         input: *const u8,
         in_len: usize,
         merge_slashes: i32,
         out: *mut u8,
         out_cap: usize,
         out_len: *mut usize,
+        args_offset: *mut usize,
+        args_len: *mut usize,
+        args_present: *mut i32,
     ) -> i32;
 }
 
@@ -30,14 +33,20 @@ extern "C" {
 /// Returns the normalized length, or `None` if nginx rejected the input.
 fn c_normalize(input: &[u8], merge: bool, out: &mut [u8]) -> Option<usize> {
     let mut out_len = 0usize;
+    let mut args_offset = 0usize;
+    let mut args_len = 0usize;
+    let mut args_present = 0i32;
     let rc = unsafe {
-        nginx_normalize_path(
+        nginx_parse_path_and_query(
             input.as_ptr(),
             input.len(),
             merge as i32,
             out.as_mut_ptr(),
             out.len(),
             &mut out_len,
+            &mut args_offset,
+            &mut args_len,
+            &mut args_present,
         )
     };
     (rc == 0).then_some(out_len)

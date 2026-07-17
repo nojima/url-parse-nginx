@@ -127,17 +127,22 @@ cat >> "$OUT" <<'TAIL'
 
 /* ==== BEGIN authored wrapper ======================================= */
 /*
- * nginx_normalize_path: normalize one origin-form path exactly as nginx does.
+ * nginx_parse_path_and_query: parse one origin-form target exactly as nginx
+ * does.
  *
- *   in, in_len     raw path bytes (need NOT be NUL-terminated; may be empty)
+ *   in, in_len     raw request-target bytes (need NOT be NUL-terminated)
  *   merge_slashes  fuzzer input: 1 = collapse "//" (nginx default), 0 = keep
  *   out            caller buffer; must have capacity >= in_len + 1
  *   out_cap        capacity of out
  *   out_len        set to the normalized path length on success
+ *   args_offset     set to the query-string offset in in on success
+ *   args_len        set to the query-string length on success
+ *   args_present    set to 1 when query arguments are present, otherwise 0
  *
  * returns:
- *    0  success (out[0..*out_len) is the normalized path)
- *   -1  nginx rejected the path (parse error / invalid request)
+ *    0  success (out[0..*out_len) is the normalized path; when *args_present
+ *       is 1, in[*args_offset..*args_offset + *args_len) is the query string)
+ *   -1  nginx rejected the request target (parse error / invalid request)
  *   -2  out_cap too small (should never happen if out_cap >= in_len + 1)
  *
  * Faithfulness notes:
@@ -150,11 +155,15 @@ cat >> "$OUT" <<'TAIL'
  *     (origin-form-unreachable) empty_path leading-slash case for parity.
  *   - The "simple URI" branch returns the input path unchanged, exactly as
  *     ngx_http_process_request_uri() does when no flag is set.
+ *   - Query arguments always refer to the original input, so returning their
+ *     offset and length requires no additional buffer or allocation.
  */
 int
-nginx_normalize_path(const unsigned char *in, size_t in_len,
-                     int merge_slashes,
-                     unsigned char *out, size_t out_cap, size_t *out_len)
+nginx_parse_path_and_query(const unsigned char *in, size_t in_len,
+                           int merge_slashes,
+                           unsigned char *out, size_t out_cap, size_t *out_len,
+                           size_t *args_offset, size_t *args_len,
+                           int *args_present)
 {
     ngx_http_request_t  r;
     u_char             *inbuf, *nbuf;
@@ -205,6 +214,11 @@ nginx_normalize_path(const unsigned char *in, size_t in_len,
         r.uri.data = r.uri_start;   /* no normalization needed */
     }
 
+    if (r.args_start && r.uri_end > r.args_start) {
+        r.args.len = (size_t) (r.uri_end - r.args_start);
+        r.args.data = r.args_start;
+    }
+
     if (r.uri.len > out_cap) {
         rc = -2;
         goto done;
@@ -214,6 +228,16 @@ nginx_normalize_path(const unsigned char *in, size_t in_len,
         memcpy(out, r.uri.data, r.uri.len);
     }
     *out_len = r.uri.len;
+
+    if (r.args.data) {
+        *args_offset = (size_t) (r.args.data - inbuf);
+        *args_len = r.args.len;
+        *args_present = 1;
+    } else {
+        *args_offset = 0;
+        *args_len = 0;
+        *args_present = 0;
+    }
 
 done:
     free(inbuf);
