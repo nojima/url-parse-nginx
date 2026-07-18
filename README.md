@@ -53,6 +53,14 @@ assert!(matches!(parse_origin_form(b"/foo/bar", true).unwrap().path, Cow::Borrow
 assert!(parse_origin_form(b"/../", true).is_err());
 ```
 
+The default `percent-encoding` feature provides `PATH_ESCAPE_SET` and enables
+the optional `percent-encoding` dependency. Disable it when only parsing is
+needed:
+
+```toml
+url-parse-nginx = { version = "...", default-features = false }
+```
+
 `parse_origin_form` returns:
 
 - `Ok(Parsed { path, args })`:

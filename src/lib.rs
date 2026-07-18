@@ -37,24 +37,41 @@
 //! normalize and percent-decode the request path, then percent-encode the
 //! normalized path again. To reproduce this decode-then-encode flow, pass
 //! [`Parsed::path`] to `percent_encoding::percent_encode` with
-//! [`PATH_ESCAPE_SET`].
+//! `PATH_ESCAPE_SET`. The set is available when the default
+//! `percent-encoding` feature is enabled.
 //!
 //! [Origin-form]: https://www.rfc-editor.org/rfc/rfc9112.html#section-3.2.1
 //!
 //! # Example
 //!
 //! ```
-//! use percent_encoding::percent_encode;
-//! use url_parse_nginx::{parse_origin_form, PATH_ESCAPE_SET};
+//! use url_parse_nginx::parse_origin_form;
 //!
 //! let parsed = parse_origin_form(b"/docs/../hello%20world?x=1", true)?;
 //! assert_eq!(&*parsed.path, b"/hello world"); // ".." resolved, "%20" decoded
 //! assert_eq!(parsed.args, Some(&b"x=1"[..]));
-//!
-//! let encoded = percent_encode(parsed.path.as_ref(), PATH_ESCAPE_SET);
-//! assert_eq!(encoded.to_string(), "/hello%20world");
 //! # Ok::<(), url_parse_nginx::ParseError>(())
 //! ```
+
+#![cfg_attr(
+    feature = "percent-encoding",
+    doc = r#"
+## Percent-encoding the normalized path
+
+The default `percent-encoding` feature also supports nginx-compatible
+re-encoding:
+
+```
+use percent_encoding::percent_encode;
+use url_parse_nginx::{parse_origin_form, PATH_ESCAPE_SET};
+
+let parsed = parse_origin_form(b"/docs/../hello%20world", true)?;
+let encoded = percent_encode(parsed.path.as_ref(), PATH_ESCAPE_SET);
+assert_eq!(encoded.to_string(), "/hello%20world");
+# Ok::<(), url_parse_nginx::ParseError>(())
+```
+"#
+)]
 
 // Implementation notes:
 //
@@ -83,6 +100,7 @@
 //   checked read that yields `\n` at that position, avoiding an input copy
 //   made solely to materialize the sentinel.
 
+#[cfg(feature = "percent-encoding")]
 use percent_encoding::{AsciiSet, CONTROLS};
 use std::borrow::Cow;
 
@@ -97,6 +115,7 @@ use std::borrow::Cow;
 /// let encoded = percent_encode(b"/hello world", PATH_ESCAPE_SET);
 /// assert_eq!(encoded.to_string(), "/hello%20world");
 /// ```
+#[cfg(feature = "percent-encoding")]
 pub const PATH_ESCAPE_SET: &AsciiSet = &CONTROLS
     .add(b' ')
     .add(b'"')

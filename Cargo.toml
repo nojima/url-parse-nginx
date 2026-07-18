@@ -15,5 +15,9 @@ exclude = ["fuzz", "nginx-reference", "bench"]
 [lib]
 name = "url_parse_nginx"
 
+[features]
+default = ["percent-encoding"]
+percent-encoding = ["dep:percent-encoding"]
+
 [dependencies]
-percent-encoding = { version = "2", default-features = false }
+percent-encoding = { version = "2", default-features = false, optional = true }
