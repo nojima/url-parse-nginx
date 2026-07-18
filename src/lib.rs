@@ -10,6 +10,8 @@
 // src/http/ngx_http_parse.c. It is distributed under the same 2-clause BSD
 // license as nginx; see the LICENSE and NOTICE files at the crate root.
 
+#![no_std]
+
 //! Parse and normalize URL paths using nginx semantics.
 //!
 //! `url-parse-nginx` is a one-to-one Rust port of nginx's URI parser
@@ -17,6 +19,10 @@
 //! nginx's accept/reject decisions and produces byte-for-byte identical
 //! normalized paths and query strings. This equivalence is continuously
 //! checked by differential fuzzing against nginx's C implementation.
+//!
+//! The crate supports `no_std` environments with `alloc`. Normalizing a path
+//! that differs from the input allocates an output buffer; unchanged paths and
+//! query strings borrow the input.
 //!
 //! [`parse_origin_form`] accepts an origin-form request target, normalizes
 //! its path, and returns the query string separately. Path normalization
@@ -100,9 +106,14 @@ assert_eq!(encoded.to_string(), "/hello%20world");
 //   checked read that yields `\n` at that position, avoiding an input copy
 //   made solely to materialize the sentinel.
 
+extern crate alloc;
+
+#[cfg(test)]
+extern crate std;
+
+use alloc::{borrow::Cow, vec};
 #[cfg(feature = "percent-encoding")]
 use percent_encoding::{AsciiSet, CONTROLS};
-use std::borrow::Cow;
 
 /// The percent-encode set nginx uses when escaping normalized paths.
 ///
@@ -161,13 +172,13 @@ fn read_with_lf_sentinel(buf: &[u8], p: usize) -> u8 {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ParseError;
 
-impl std::fmt::Display for ParseError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl core::fmt::Display for ParseError {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.write_str("failed to parse request target")
     }
 }
 
-impl std::error::Error for ParseError {}
+impl core::error::Error for ParseError {}
 
 /// The result of parsing an origin-form request target.
 ///
@@ -797,6 +808,7 @@ fn parsed_args<'a>(r: &Request, input: &'a [u8]) -> Option<&'a [u8]> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::string::{String, ToString};
 
     fn norm(s: &str, merge: bool) -> Result<String, ParseError> {
         parse_origin_form(s.as_bytes(), merge)

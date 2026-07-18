@@ -25,11 +25,15 @@ fuzzer that runs the real nginx C code against this port (see below).
   HTTP/2 and HTTP/3 `:path` pseudo-header. Absolute-form (`http://host/path`),
   authority-form (`CONNECT`), and `OPTIONS *` are out of scope.
 - Targets the Linux, non-debug build of nginx (`NGX_WIN32` / `NGX_DEBUG` off).
+- Supports `no_std` environments with `alloc`. Normalized paths allocate only
+  when their bytes differ from the input.
 
 ## Usage
 
 ```rust
-use std::borrow::Cow;
+extern crate alloc;
+
+use alloc::borrow::Cow;
 use url_parse_nginx::parse_origin_form;
 
 // merge_slashes = true matches nginx's default `merge_slashes on`.
