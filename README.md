@@ -1,5 +1,8 @@
 # url-parse-nginx
 
+[![Crates.io](https://img.shields.io/crates/v/url-parse-nginx.svg)](https://crates.io/crates/url-parse-nginx)
+[![docs.rs](https://docs.rs/url-parse-nginx/badge.svg)](https://docs.rs/url-parse-nginx)
+
 A faithful, 1-to-1 Rust port of nginx's URL **path normalization**.
 
 `url-parse-nginx` reproduces exactly what nginx does when it turns a raw
