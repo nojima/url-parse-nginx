@@ -1,6 +1,6 @@
 [package]
 name = "url-parse-nginx"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
 description = "A faithful, 1-to-1 Rust port of nginx's URL path parser (ngx_http_parse_uri / ngx_http_parse_complex_uri) for origin-form paths."
 license = "BSD-2-Clause"
