@@ -20,10 +20,6 @@
 //! normalized paths and query strings. This equivalence is continuously
 //! checked by differential fuzzing against nginx's C implementation.
 //!
-//! The crate supports `no_std` environments with `alloc`. Normalizing a path
-//! that differs from the input allocates an output buffer; unchanged paths and
-//! query strings borrow the input.
-//!
 //! [`parse_origin_form`] accepts an origin-form request target, normalizes
 //! its path, and returns the query string separately. Path normalization
 //! percent-decodes `%XX`, resolves `.` and `..` segments, and optionally merges
@@ -39,12 +35,7 @@
 //! The parsing behavior follows nginx on Linux; Windows-specific nginx
 //! behavior is not supported.
 //!
-//! Some nginx processing paths, including some `proxy_pass` cases, first
-//! normalize and percent-decode the request path, then percent-encode the
-//! normalized path again. To reproduce this decode-then-encode flow, pass
-//! [`Parsed::path`] to `percent_encoding::percent_encode` with
-//! `PATH_ESCAPE_SET`. The set is available when the `percent-encoding`
-//! feature is enabled (enabled by default).
+//! The crate supports `no_std` environments with `alloc`.
 //!
 //! [Origin-form]: https://www.rfc-editor.org/rfc/rfc9112.html#section-3.2.1
 //!
@@ -63,6 +54,13 @@
     feature = "percent-encoding",
     doc = r#"
 ## Percent-encoding the normalized path
+
+Some nginx processing paths, including some `proxy_pass` cases, first
+normalize and percent-decode the request path, then percent-encode the
+normalized path again. To reproduce this decode-then-encode flow, pass
+[`Parsed::path`] to `percent_encoding::percent_encode` with
+[`PATH_ESCAPE_SET`]. The set is available when the `percent-encoding`
+feature is enabled (enabled by default).
 
 The default `percent-encoding` feature also supports nginx-compatible
 re-encoding:
@@ -729,8 +727,12 @@ fn ngx_http_parse_complex_uri(
 
 /// Parse a single origin-form request target exactly as nginx does.
 ///
-/// The returned values correspond to the values nginx exposes through
-/// its `$uri` and `$args` variables.
+/// An origin-form target is the absolute path and optional query string that a
+/// client puts on the request line, for example `/docs/../hello%20world?x=1`
+/// (see [RFC 9112 §3.2.1](https://www.rfc-editor.org/rfc/rfc9112#section-3.2.1)).
+///
+/// The return value consists of `path` and `args`, which correspond to nginx's
+/// `$uri` and `$args` respectively.
 ///
 /// * `Ok(`[`Parsed`]`)` — the normalized path and query string. For a "simple"
 ///   path that needs no normalization, the path borrows the input unchanged
