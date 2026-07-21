@@ -43,8 +43,8 @@
 //! normalize and percent-decode the request path, then percent-encode the
 //! normalized path again. To reproduce this decode-then-encode flow, pass
 //! [`Parsed::path`] to `percent_encoding::percent_encode` with
-//! `PATH_ESCAPE_SET`. The set is available when the default
-//! `percent-encoding` feature is enabled.
+//! `PATH_ESCAPE_SET`. The set is available when the `percent-encoding`
+//! feature is enabled (enabled by default).
 //!
 //! [Origin-form]: https://www.rfc-editor.org/rfc/rfc9112.html#section-3.2.1
 //!
@@ -55,7 +55,7 @@
 //!
 //! let parsed = parse_origin_form(b"/docs/../hello%20world?x=1", true)?;
 //! assert_eq!(&*parsed.path, b"/hello world"); // ".." resolved, "%20" decoded
-//! assert_eq!(parsed.args, Some(&b"x=1"[..]));
+//! assert_eq!(parsed.args.unwrap(), b"x=1");
 //! # Ok::<(), url_parse_nginx::ParseError>(())
 //! ```
 
@@ -72,10 +72,13 @@ use percent_encoding::percent_encode;
 use url_parse_nginx::{parse_origin_form, PATH_ESCAPE_SET};
 
 let parsed = parse_origin_form(b"/docs/../hello%20world", true)?;
-let encoded = percent_encode(parsed.path.as_ref(), PATH_ESCAPE_SET);
+let encoded = percent_encode(&parsed.path, PATH_ESCAPE_SET);
 assert_eq!(encoded.to_string(), "/hello%20world");
 # Ok::<(), url_parse_nginx::ParseError>(())
 ```
+
+Using `percent_encoding::percent_encode` requires a direct dependency on the
+[`percent-encoding`](https://docs.rs/percent-encoding/) crate.
 "#
 )]
 
@@ -737,9 +740,9 @@ fn ngx_http_parse_complex_uri(
 ///
 /// `merge_slashes` corresponds to nginx's [`merge_slashes`](https://nginx.org/en/docs/http/ngx_http_core_module.html#merge_slashes)
 /// directive: `true` is `on` (the nginx default), and `false` is `off`.
-pub fn parse_origin_form(input: &[u8], merge_slashes: bool) -> Result<Parsed<'_>, ParseError> {
+pub fn parse_origin_form(target: &[u8], merge_slashes: bool) -> Result<Parsed<'_>, ParseError> {
     // HTTP/2 and HTTP/3 reject an empty :path before parsing it.
-    if input.is_empty() {
+    if target.is_empty() {
         return Err(ParseError);
     }
 
@@ -747,7 +750,7 @@ pub fn parse_origin_form(input: &[u8], merge_slashes: bool) -> Result<Parsed<'_>
 
     // Stage 1 scans the request target and records whether normalization is
     // needed. Unlike stage 2, it does not read nginx's trailing LF sentinel.
-    ngx_http_parse_uri(&mut r, input)?;
+    ngx_http_parse_uri(&mut r, target)?;
 
     let path = if r.complex_uri || r.quoted_uri || r.empty_path_in_uri {
         // Stage 2 normalizes the request target into a separate output buffer.
@@ -755,8 +758,8 @@ pub fn parse_origin_form(input: &[u8], merge_slashes: bool) -> Result<Parsed<'_>
         //
         // Output never exceeds input length; +1 covers the
         // (origin-form-unreachable) empty-path leading slash.
-        let mut out = vec![0u8; input.len() + 1];
-        ngx_http_parse_complex_uri(&mut r, input, &mut out, merge_slashes)?;
+        let mut out = vec![0u8; target.len() + 1];
+        ngx_http_parse_complex_uri(&mut r, target, &mut out, merge_slashes)?;
         out.truncate(r.uri.len);
         Cow::Owned(out)
     } else {
@@ -764,14 +767,14 @@ pub fn parse_origin_form(input: &[u8], merge_slashes: bool) -> Result<Parsed<'_>
         // input directly, no allocation.
         let len = match r.args_start {
             Some(a) => a - 1,
-            None => input.len(),
+            None => target.len(),
         };
-        Cow::Borrowed(&input[..len])
+        Cow::Borrowed(&target[..len])
     };
 
     Ok(Parsed {
         path,
-        args: parsed_args(&r, input),
+        args: parsed_args(&r, target),
     })
 }
 
