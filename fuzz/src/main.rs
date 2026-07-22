@@ -259,7 +259,8 @@ fn main() -> ExitCode {
         b"/a%2fb", b"/%00", b"/foo?bar", b"/foo#frag", b"/foo?a=b#c", b"/+",
         b"/foo?", b"/foo?#frag", b"/foo?x=%20", b"/%20", b"/a..b", b"/...",
         b"/....", b"/a/..", b"relative", b"/%zz", b"/%2", b"/a%", b"/\\",
-        b"/a\\b", b"/.%2e/", b"/%2e./",
+        b"/a\\b", b"/.%2e/", b"/%2e./", b"*", b".", b"%", b" ", b"\n", b"\0", 
+        b"http://example.com", b"http://example.com/", b"http://example.com/foo",
     ];
     for input in corpus {
         for &merge in &[true, false] {
