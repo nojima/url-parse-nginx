@@ -26,5 +26,5 @@ jobs:
           --release
           --manifest-path fuzz/Cargo.toml
           --
-          1000000
+          10000000
           11400714819323198485
