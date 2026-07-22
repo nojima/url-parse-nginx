@@ -11,6 +11,7 @@
 // license as nginx; see the LICENSE and NOTICE files at the crate root.
 
 #![no_std]
+#![deny(unsafe_code)]
 
 //! Parse and normalize URL paths using nginx semantics.
 //!
