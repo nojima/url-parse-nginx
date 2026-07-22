@@ -98,14 +98,15 @@ The repository contains developer tooling (not shipped in the published crate):
   real nginx C code (see below).
 
 ```sh
-# exhaustive corpus ("/", "/"+1..3 arbitrary bytes) + random inputs
+# exhaustive corpus ("/", "/"+1..3 arbitrary bytes, "/"+4 printable bytes) + random inputs
 cd fuzz
 cargo run --release -- <iterations> <seed>
 ```
 
 Before random generation, the fuzzer exhaustively checks `/` followed by every
-1-, 2-, and 3-byte suffix (~16.7M cases). Random fuzzing then extends coverage
-to longer inputs.
+1-, 2-, and 3-byte suffix (~16.7M cases), and then `/` followed by every 4-byte
+suffix of printable ASCII (`0x20`..=`0x7e`, 95^4 ≈ 81.5M cases). Random fuzzing
+then extends coverage to longer inputs.
 
 ## Benchmark
 

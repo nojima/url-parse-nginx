@@ -292,6 +292,29 @@ fn main() -> ExitCode {
         eprintln!("'/'+{suffix_len}-byte exhaustive ({total} cases): OK");
     }
 
+    // 1c) Exhaustive: every 4-byte suffix of printable ASCII (0x20..=0x7e)
+    //     appended to a leading "/". 95^4 = 81_450_625 cases.
+    const PRINTABLE: std::ops::RangeInclusive<u8> = 0x20..=0x7e;
+    let printable: Vec<u8> = PRINTABLE.collect();
+    let base = printable.len(); // 95
+    let total = base.pow(4);
+    let mut input = vec![b'/'; 1 + 4];
+    for n in 0..total {
+        // little-endian odometer over the printable alphabet
+        let mut v = n;
+        for i in 0..4 {
+            input[1 + i] = printable[v % base];
+            v /= base;
+        }
+        for &merge in &[true, false] {
+            if !check(&input, merge) {
+                eprintln!("\n(divergence in '/'+4-printable-byte exhaustive corpus)");
+                return ExitCode::FAILURE;
+            }
+        }
+    }
+    eprintln!("'/'+4-printable-byte exhaustive ({total} cases): OK");
+
     // 2) Random differential fuzzing.
     let mut rng = Rng(seed);
     let mut buf = Vec::with_capacity(64);
